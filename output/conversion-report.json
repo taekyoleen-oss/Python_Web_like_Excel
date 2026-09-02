@@ -1,0 +1,82 @@
+[
+  {
+    "row": "입력 t:'n' — 열 전체 정수 → int64",
+    "pass": true
+  },
+  {
+    "row": "입력 t:'n' — 소수 혼재 → float64",
+    "pass": true
+  },
+  {
+    "row": "입력 t:'s' → str(object)",
+    "pass": true
+  },
+  {
+    "row": "입력 t:'b' → bool",
+    "pass": true
+  },
+  {
+    "row": "입력 t:'d' → datetime64[ns] (Timestamp)",
+    "pass": true
+  },
+  {
+    "row": "입력 빈 셀 → NaN/NaT/None (경계 케이스 #1)",
+    "pass": true
+  },
+  {
+    "row": "입력 단일 셀 xl('A1') → 스칼라",
+    "pass": true
+  },
+  {
+    "row": "출력 스칼라 → 1셀 (None→빈 셀, bool→'b')",
+    "pass": true
+  },
+  {
+    "row": "출력 list/1D ndarray/Series → 세로 1열 (Series name은 헤더)",
+    "pass": true
+  },
+  {
+    "row": "출력 중첩 list/2D ndarray → 2D spill",
+    "pass": true
+  },
+  {
+    "row": "출력 DataFrame → 헤더+값, includeIndex auto/always/never",
+    "pass": true
+  },
+  {
+    "row": "출력 dict → 2열(키·값)",
+    "pass": true
+  },
+  {
+    "row": "출력 datetime/Timestamp → t:'d' ISO + 서식",
+    "pass": true
+  },
+  {
+    "row": "출력 Figure → 값 모드 오류 / 객체 모드 PNG dpi150",
+    "pass": true
+  },
+  {
+    "row": "출력 그 외 객체 → 값 모드 str() 1셀 / 객체 모드 repr 카드",
+    "pass": true
+  },
+  {
+    "row": "G2: xl('A1:F21', headers=True) 골든 dtype + NaN/NaT",
+    "pass": true
+  },
+  {
+    "row": "extract_refs: 리터럴 추출·중복 제거·순서 유지",
+    "pass": true
+  },
+  {
+    "row": "extract_refs: 비리터럴 인수 → 한국어 오류 (§2.4)",
+    "pass": true
+  },
+  {
+    "row": "xl 미주입 참조 → RuntimeError 안전망",
+    "pass": true
+  },
+  {
+    "row": "객체 모드 DataFrame → table preview 상위 100행 + dtypes + NaN null",
+    "pass": true
+  }
+]

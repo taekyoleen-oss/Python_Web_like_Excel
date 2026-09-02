@@ -1,4 +1,4 @@
-# 런타임 워커 프로토콜 (M3)
+# 런타임 워커 프로토콜 (M4)
 
 계약 원본: `lib/runtime/protocol.ts` — 이 문서는 그 해설이다. protocol.ts가 바뀌면 이 문서를 함께 갱신한다.
 소비 측(grid-ui)은 워커를 직접 다루지 말고 **`lib/runtime/client.ts`의 `getRuntimeClient()`**를 쓴다.
@@ -7,9 +7,12 @@
 
 | 파일 | 역할 |
 |------|------|
-| `workers/pyodide.worker.ts` | 모듈 워커. CDN에서 Pyodide 로드, 코드 실행, stdout/stderr 스트리밍 |
+| `workers/pyodide.worker.ts` | 모듈 워커. CDN에서 Pyodide 로드, 스냅샷 주입, 코드 실행+변환, stdout/stderr 스트리밍 |
 | `lib/runtime/client.ts` | 메인 스레드 클라이언트: 부트, 준비 전 큐잉, 요청/응답 매핑, 타임아웃·인터럽트·재부트 |
-| `lib/runtime/py/bootstrap.py` | 워커 내부 헬퍼(`_pygrid_run`·`_pygrid_inspect`·`_pygrid_reset`·`_pygrid_mpl_setup`) |
+| `lib/runtime/py/bootstrap.py` | 워커 내부 헬퍼(`_pygrid_exec_capture`·`_pygrid_run`·`_pygrid_inspect`·`_pygrid_reset`·`_pygrid_mpl_setup`) |
+| `lib/runtime/py/xl.py` | `xl()` 브리지: 참조 추출(ast) + 스냅샷 캐시 → §3.3 입력 변환(DataFrame/스칼라) |
+| `lib/runtime/py/convert.py` | §3.3 출력 변환: 값 모드 `cells`, 객체 모드 preview/PNG |
+| `lib/runtime/converters.ts` | `OutCell[][]` → `Cell[][]`(`toCells`), 앵커+shape → `spillRange`. 순수 함수 |
 | `lib/runtime/py/init_default.py` | 기본 초기화 스크립트. `client.ts`가 `DEFAULT_INIT_SCRIPT`로 재수출 |
 
 원칙: **PyProxy는 postMessage로 넘기지 않는다.** 모든 페이로드는 JSON-safe(이미지 등 ArrayBuffer는 transferable).
@@ -33,7 +36,7 @@
 - 워커는 **모든 run/repl 전에** `loadPackagesFromImports(code)`를 돌리고, 직후 `_pygrid_mpl_setup()`(멱등)을 호출한다.
   → 사용자가 처음 `import matplotlib` 하는 순간 패키지가 로드되고 Agg 백엔드 + Pretendard 폰트가 자동 적용된다.
 - 초기화 스크립트에는 `loadPackagesFromImports`를 적용하지 않는다(guarded import를 부트 시 내려받지 않기 위함).
-  **제약**: 커스텀 초기화 스크립트가 scipy 등 미로드 패키지를 import하면 ImportError가 stderr(id 0)로 보고되고 부트는 계속된다. — TODO(M4): 초기화 스크립트용 패키지 선로드 옵션.
+  **제약**: 커스텀 초기화 스크립트가 scipy 등 미로드 패키지를 import하면 ImportError가 stderr(id 0)로 보고되고 부트는 계속된다. — TODO(후속): 초기화 스크립트용 패키지 선로드 옵션.
 
 ## 준비 전 큐잉
 
@@ -47,8 +50,8 @@
 |---|------|------|
 | `boot` | indexURL, packages, initScript, fontUrl | 부트. 워커당 1회(중복 무시) |
 | `setInterruptBuffer` | buffer: SharedArrayBuffer | 인터럽트 버퍼. 체인 밖에서 즉시 적용(부트 전이면 보관) |
-| `analyze` | id, code | xl() 참조 추출. **M3는 빈 배열 반환** — TODO(M4) |
-| `run` | id, blockId, code, snapshots, outputMode, includeIndex | 블록 실행. **M3는 snapshots 미사용, object 모드 repr 미리보기만** — TODO(M4): xl 캐시 주입 + convert.py 변환 |
+| `analyze` | id, code | `xl()` 참조 추출(ast). 리터럴 위반 → `analyzeError` |
+| `run` | id, blockId, code, snapshots, outputMode, includeIndex | 블록 실행: 스냅샷 주입 → 실행 → §3.3 변환 |
 | `repl` | id, code | 콘솔 실행(공유 네임스페이스) |
 | `inspect` | id | 전역 변수 목록 |
 | `resetRuntime` | id, initScript | 워커 안 best-effort 리셋(사용자 전역 삭제 → 초기화 스크립트 재실행) |
@@ -61,9 +64,9 @@
 | `ready` | pyVersion, pyodideVersion | 부트 완료 |
 | `bootError` | message | 부트 실패 |
 | `stdout` / `stderr` | id, chunk | 라인 단위 스트리밍. id = 진행 중인 run/repl id, **유휴(부트·리셋 출력)는 id 0** |
-| `analyzed` | id, refs | M3: 항상 `[]` |
-| `analyzeError` | id, message | M3: 미발생 |
-| `result` | id, blockId + RunPayload | run 결과. 성공 M3: `kind:'object'`, typeName, `preview:{kind:'repr',repr}`. 실패: errorType(예외 클래스명)·message·traceback·durationMs |
+| `analyzed` | id, refs | `xl()` 문자열 리터럴 인수를 그대로(중복 제거·순서 유지) |
+| `analyzeError` | id, message | `xl() 인수는 문자열 리터럴이어야 합니다` / `xl() headers 인수는 True/False 리터럴이어야 합니다` / `구문 오류: …` |
+| `result` | id, blockId + RunPayload | run 결과(아래 "run 변환 결과" 참조). 실패: errorType(예외 클래스명)·message·traceback·durationMs |
 | `replResult` | id, repr, stdout:'', stderr:'', traceback? | repr = 마지막 표현식의 `repr()`, None이면 null. stdout/stderr 필드는 빈 문자열(이미 스트리밍됨) |
 | `variables` | id, vars: VariableInfo[] | name·type·shape(2D만)·summary(repr ≤80자). 모듈·함수·클래스·`_` 이름 제외 |
 | `resetDone` | id | 리셋 완료 |
@@ -72,10 +75,26 @@
 
 1. `loadPackagesFromImports(code)` (오류 무시 — 구문 오류는 실행 단계에서 더 나은 트레이스백으로 보고)
 2. `_pygrid_mpl_setup()` (멱등)
-3. `_pygrid_run(code)`: `ast`로 본문을 exec하고, **마지막 문장이 표현식이면 eval해 repr 캡처**(None → null).
+3. **run만**: `msg.snapshots`(JSON)를 `_pygrid_xl_load`로 워커 내부 캐시에 주입. 실행이 끝나면(finally) 캐시를 비운다 — 스냅샷은 요청 단위로만 유효하다.
+4. 본문을 exec하고 **마지막 문장이 표현식이면 eval해 값 캡처**. repl은 repr(None → null), run은 §3.3 변환.
    예외 시 워커 래퍼 프레임을 지운 트레이스백(`<pygrid>` 프레임부터) + 예외 클래스명(errorType).
    `KeyboardInterrupt`(중단)도 같은 실패 경로로 보고된다 → errorType `"KeyboardInterrupt"`.
-4. 제약: 콘솔/블록 코드의 **top-level await 미지원**(ast exec/eval 캡처 방식) — 필요해지면 `PyCF_ALLOW_TOP_LEVEL_AWAIT`로 확장.
+5. 제약: 콘솔/블록 코드의 **top-level await 미지원**(ast exec/eval 캡처 방식) — 필요해지면 `PyCF_ALLOW_TOP_LEVEL_AWAIT`로 확장.
+
+## xl() 스냅샷 주입 계약 (calc engine → run)
+
+- `run.snapshots`: `Record<참조 문자열, RangeSnapshot>` — 키는 `analyze`가 돌려준 refs **그대로**(예: `"A1:F21"`, `"Sheet2!A1"`). 코드 안 `xl("...")` 리터럴과 문자 단위로 일치해야 한다.
+- `RangeSnapshot.values`는 항상 2D(단일 셀도 1×1), 빈 셀은 `null`. `scalar:true`면 `xl()`이 스칼라를 돌려준다.
+- 주입 안 된 참조를 실행 중 `xl()`이 만나면 `RuntimeError: xl(): 참조 '…'의 데이터가 준비되지 않았습니다` (안전망 — calc engine이 항상 선주입해야 한다).
+- `xl(ref, headers=False)` 입력 변환(§3.3): 열 전체 `'n'` 정수·빈 셀 없음 → `int64`, `'n'` 그 외 → `float64`+NaN, `'d'` → `datetime64[ns]`+NaT, `'b'` 빈 셀 없음 → `bool`, 그 외/혼합/빈 셀 포함 → `object`+None. `headers=True`면 첫 행이 컬럼명(빈 헤더는 `Unnamed: {j}`), `False`면 정수 컬럼 0..n-1. 경계 케이스 결정: `docs/domain/conversion-rules.md`.
+
+## run 변환 결과 (§3.3 출력)
+
+- **값 모드**(`outputMode:'values'`): `cells: OutCell[][]` + `shape` + `kind`(1×1이면 `'scalar'` 아니면 `'table'`).
+  - 스칼라→1×1(None/NaN/NaT/inf → `{v:null,t:'s'}` 빈 셀), bool→`'b'`, 날짜→`'d'` ISO+`f` 서식, list/1D ndarray→세로 1열, Series→name 있으면 헤더 셀+값, 2D→2D, dict→2열(키·값), DataFrame→헤더 행+값(includeIndex `'auto'`: 기본 RangeIndex 제외·그 외 첫 열, `'always'`/`'never'` 강제), 그 외 객체→`str()` 1셀.
+  - Figure는 값 모드 불가 → RunFailure `errorType:"PyGridImageError"`, message `이미지는 값으로 펼칠 수 없습니다` (grid-ui는 `#PYTHON!` 셀로 표시).
+- **객체 모드**(`'object'`): `kind` 분류 — DataFrame/Series→`'table'`(preview: columns·dtypes·상위 100행·shape, NaN/NaT→null), Figure→`'image'`(`imagePng: ArrayBuffer` transferable, PNG dpi150), 스칼라류→`'scalar'`(preview repr), 그 외→`'object'`(preview repr, 2000자 절단).
+- 변환 자체가 예상 밖으로 실패하면 `errorType:"ConversionError"`.
 
 ## 타임아웃 · 인터럽트 · 재부트
 
@@ -92,7 +111,7 @@ getRuntimeClient(): RuntimeClient            // 앱 전역 싱글턴 (브라우�
 boot(opts?): Promise<void>                   // 멱등
 run(blockId, code, snapshots?, outputMode?, includeIndex?, timeoutSec?): Promise<RunPayload>
 repl(code, timeoutSec?): Promise<{ repr: string | null; traceback?: string }>
-analyze(code): Promise<string[]>             // M3: []
+analyze(code): Promise<string[]>             // 비리터럴 인수 → reject(Error(한국어 메시지))
 inspect(): Promise<VariableInfo[]>
 reset(): Promise<void>
 interrupt(): void
@@ -103,8 +122,6 @@ getVersions(): { pyVersion, pyodideVersion } | null
 DEFAULT_INIT_SCRIPT                          // init_default.py 원문 (UI 기본값)
 ```
 
-## M4에서 바뀔 표면 (grid-ui 참고)
+grid-ui 소비 헬퍼(`lib/runtime/converters.ts`): `toCells(cells)` → `Cell[][]`(v:null=빈 셀), `spillRange(anchor, rows, cols)` → `CellRange`.
 
-- `analyze` → 실제 xl() 참조 문자열 배열(비리터럴 인수는 `analyzeError`).
-- `run` → `snapshots`가 xl() 캐시에 주입되고, values 모드는 `cells: OutCell[][]`, table/image kind·`imagePng`(transferable) 등 RunPayload의 나머지 필드가 채워진다.
-- 프로토콜 타입 자체(`protocol.ts`)는 M3에서 변경하지 않았다 — 소비 코드는 지금 형태로 작성해도 M4와 호환된다.
+검증: §3.3 행 단위 테스트 `tests/pyodide/convert.test.ts`(`npm run test:py`) → `output/conversion-report.json`. M5(calc engine)가 snapshots 직렬화·spill 반영을 잇는다.

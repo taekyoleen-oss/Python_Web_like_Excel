@@ -124,11 +124,20 @@ export class RuntimeClient {
     });
     this.worker.onmessage = (ev: MessageEvent<WorkerToMain>) => this.handle(ev.data);
     this.worker.onerror = (ev) => {
+      const err = new Error(ev.message || "워커 오류");
       if (!this.readyFlag) {
         this.setStatus("error");
-        this.bootSettle?.reject(new Error(ev.message || "워커 로드 오류"));
+        this.bootSettle?.reject(err);
         this.bootSettle = null;
       }
+      // 워커가 ready 이후 죽으면 대기 중 요청(analyze/inspect 포함)이 영원히
+      // 매달리지 않도록 전부 거부한다
+      for (const p of this.pending.values()) {
+        if (p.timer) clearTimeout(p.timer);
+        p.reject(err);
+      }
+      this.pending.clear();
+      if (this.readyFlag) this.refreshStatus();
     };
   }
 
@@ -227,6 +236,9 @@ export class RuntimeClient {
     if (!p) return;
     if (p.timer) clearTimeout(p.timer);
     this.pending.delete(id);
+    // 타임아웃으로 SIGINT를 썼는데 그 직후 정상 응답이 온 경우, 남은 신호가
+    // 다음 실행을 오염시키지 않도록 버퍼를 비운다
+    if (this.sharedInterrupt) this.sharedInterrupt.view[0] = 0;
     p.resolve(msg);
     this.refreshStatus();
   }

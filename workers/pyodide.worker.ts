@@ -4,13 +4,22 @@
 
 import type { PyodideInterface } from "pyodide";
 
-import type { MainToWorker, VariableInfo, WorkerToMain } from "../lib/runtime/protocol";
+import type {
+  MainToWorker,
+  OutCell,
+  PreviewPayload,
+  VariableInfo,
+  WorkerToMain,
+} from "../lib/runtime/protocol";
 import bootstrapPy from "../lib/runtime/py/bootstrap.py";
+import convertPy from "../lib/runtime/py/convert.py";
+import xlPy from "../lib/runtime/py/xl.py";
 
 // tsconfig lib이 dom이므로 webworker 전역을 좁은 타입으로 캐스팅해 쓴다
 // Next는 청크 끝에 `_N_E = __webpack_exports__` (output.library 대입)를 붙인다.
 // 클래식 워커(sloppy)에서는 암묵적 전역이 되지만 모듈 워커(strict)에서는 ReferenceError가
-// 나므로 전역 프로퍼티를 미리 만들어 둔다.
+// 나므로 전역 프로퍼티를 미리 만들어 둔다. Next 업그레이드로 다시 깨지면
+// client.ts의 ["type"] 해크와 같은 폴백: public/ 정적 워커로 전환한다.
 (globalThis as Record<string, unknown>)._N_E = undefined;
 
 const ctx = globalThis as unknown as {
@@ -19,7 +28,8 @@ const ctx = globalThis as unknown as {
   addEventListener(type: "message", fn: (ev: MessageEvent<MainToWorker>) => void): void;
 };
 
-const post = (msg: WorkerToMain): void => ctx.postMessage(msg);
+const post = (msg: WorkerToMain, transfer?: Transferable[]): void =>
+  ctx.postMessage(msg, transfer);
 
 let pyodide: PyodideInterface | null = null;
 let initScript = "";
@@ -106,7 +116,10 @@ async function boot(msg: Extract<MainToWorker, { t: "boot" }>): Promise<void> {
       post({ t: "stderr", id: 0, chunk: "한글 폰트 등록 실패 — 차트 한글이 깨질 수 있습니다" });
     }
 
-    py.runPython(bootstrapPy); // _pygrid_* 헬퍼 정의
+    // _pygrid_* 헬퍼 + xl() 브리지 + §3.3 변환 정의 (리셋에서도 살아남는다)
+    py.runPython(bootstrapPy);
+    py.runPython(xlPy);
+    py.runPython(convertPy);
 
     post({ t: "progress", pct: 90, label: "초기화 스크립트" });
     pyodide = py;
@@ -166,6 +179,27 @@ async function handleRepl(msg: Extract<MainToWorker, { t: "repl" }>): Promise<vo
   }
 }
 
+/** convert.py _pygrid_run_convert 결과 */
+interface PyConvertResult {
+  ok: boolean;
+  kind?: "scalar" | "table" | "image" | "object";
+  typeName?: string;
+  shape?: [number, number];
+  cells?: OutCell[][];
+  preview?: PreviewPayload;
+  pngB64?: string;
+  etype?: string;
+  msg?: string;
+  tb?: string;
+}
+
+function b64ToArrayBuffer(b64: string): ArrayBuffer {
+  const bin = atob(b64);
+  const u8 = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+  return u8.buffer;
+}
+
 async function handleRun(msg: Extract<MainToWorker, { t: "run" }>): Promise<void> {
   const t0 = performance.now();
   const fail = (errorType: string, message: string, traceback: string): void =>
@@ -186,44 +220,73 @@ async function handleRun(msg: Extract<MainToWorker, { t: "run" }>): Promise<void
     fail("RuntimeNotReady", "런타임이 아직 준비되지 않았습니다", "");
     return;
   }
-  // TODO(M4): msg.snapshots를 xl.py 캐시에 주입하고 outputMode/includeIndex에 따라
-  //           convert.py로 values/object 변환을 수행한다. M3는 repr 미리보기만 반환.
   currentRunId = msg.id;
   try {
     await loadImports(py, msg.code);
-    const r = await pyRun(py, msg.code);
+    // xl() 스냅샷 주입 → 실행+변환 → finally에서 캐시 비움 (계약: runtime-protocol.md)
+    py.globals.set("_pygrid_snapshots", JSON.stringify(msg.snapshots));
+    py.runPython("_pygrid_xl_load(_pygrid_snapshots)");
+    py.globals.set("_pygrid_code", msg.code);
+    py.globals.set("_pygrid_output_mode", msg.outputMode);
+    py.globals.set("_pygrid_include_index", msg.includeIndex);
+    const raw: string = await py.runPythonAsync(
+      "_pygrid_run_convert(_pygrid_code, _pygrid_output_mode, _pygrid_include_index)",
+    );
+    const r = JSON.parse(raw) as PyConvertResult;
     const durationMs = Math.round(performance.now() - t0);
-    if (r.ok) {
-      post({
+    if (!r.ok) {
+      fail(r.etype ?? "Exception", r.msg ?? "", r.tb ?? "");
+      return;
+    }
+    const imagePng = r.pngB64 ? b64ToArrayBuffer(r.pngB64) : undefined;
+    post(
+      {
         t: "result",
         id: msg.id,
         blockId: msg.blockId,
         ok: true,
-        kind: "object",
-        typeName: r.type ?? "NoneType",
-        preview: { kind: "repr", repr: r.repr ?? "None" },
+        kind: r.kind ?? "object",
+        typeName: r.typeName,
+        shape: r.shape,
+        cells: r.cells,
+        preview: r.preview,
+        imagePng,
         stdout: "",
         stderr: "",
         durationMs,
-      });
-    } else {
-      post({
-        t: "result",
-        id: msg.id,
-        blockId: msg.blockId,
-        ok: false,
-        errorType: r.etype ?? "Exception",
-        message: r.msg ?? "",
-        traceback: r.tb ?? "",
-        stdout: "",
-        stderr: "",
-        durationMs,
-      });
-    }
+      },
+      imagePng ? [imagePng] : undefined,
+    );
   } catch (err) {
     fail("WorkerError", err instanceof Error ? err.message : String(err), "");
   } finally {
+    try {
+      py.runPython("_pygrid_xl_cache.clear()");
+    } catch {
+      // 무시
+    }
     currentRunId = 0;
+  }
+}
+
+function handleAnalyze(msg: Extract<MainToWorker, { t: "analyze" }>): void {
+  const py = pyodide;
+  if (!py) {
+    post({ t: "analyzeError", id: msg.id, message: "런타임이 아직 준비되지 않았습니다" });
+    return;
+  }
+  try {
+    py.globals.set("_pygrid_code", msg.code);
+    const raw = py.runPython("_pygrid_extract_refs(_pygrid_code)") as string;
+    const r = JSON.parse(raw) as { ok: boolean; refs?: string[]; message?: string };
+    if (r.ok) post({ t: "analyzed", id: msg.id, refs: r.refs ?? [] });
+    else post({ t: "analyzeError", id: msg.id, message: r.message ?? "분석 오류" });
+  } catch (err) {
+    post({
+      t: "analyzeError",
+      id: msg.id,
+      message: err instanceof Error ? err.message : String(err),
+    });
   }
 }
 
@@ -264,8 +327,7 @@ async function dispatch(msg: MainToWorker): Promise<void> {
     case "run":
       return handleRun(msg);
     case "analyze":
-      // TODO(M4): xl.py의 ast 분석으로 실제 xl() 참조를 추출한다
-      post({ t: "analyzed", id: msg.id, refs: [] });
+      handleAnalyze(msg);
       return;
     case "inspect":
       handleInspect(msg);

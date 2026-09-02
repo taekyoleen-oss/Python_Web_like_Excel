@@ -1,0 +1,348 @@
+// §3.3 변환 규칙 행 단위 검증 — Node용 Pyodide로 xl.py/convert.py를 실제 실행한다.
+// 첫 실행은 numpy·pandas·matplotlib CDN 다운로드로 느리다(node_modules/.pyodide-cache에 캐시).
+// 결과 요약 → output/conversion-report.json
+
+import { readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
+
+import { loadPyodide, type PyodideInterface } from "pyodide";
+import { afterAll, beforeAll, expect, test } from "vitest";
+
+import type { RangeSnapshot } from "@/lib/runtime/protocol";
+import type { CellType } from "@/types/workbook";
+
+let py: PyodideInterface;
+const results: { row: string; pass: boolean }[] = [];
+
+/** §3.3 행 하나 = 테스트 하나. 결과를 conversion-report.json에 적재한다 */
+const row = (name: string, fn: () => void | Promise<void>) =>
+  test(name, async () => {
+    try {
+      await fn();
+      results.push({ row: name, pass: true });
+    } catch (e) {
+      results.push({ row: name, pass: false });
+      throw e;
+    }
+  });
+
+const pyEval = (expr: string): unknown => py.runPython(expr);
+
+const inject = (snapshots: Record<string, RangeSnapshot>) => {
+  py.globals.set("_pygrid_snapshots", JSON.stringify(snapshots));
+  py.runPython("_pygrid_xl_load(_pygrid_snapshots)");
+};
+
+interface ConvertResult {
+  ok: boolean;
+  kind?: string;
+  typeName?: string;
+  shape?: [number, number];
+  cells?: { v: unknown; t: string; f?: string }[][];
+  preview?: {
+    kind: string;
+    columns?: string[];
+    dtypes?: string[];
+    rows?: unknown[][];
+    shape?: [number, number];
+    repr?: string;
+  };
+  pngB64?: string;
+  etype?: string;
+  msg?: string;
+}
+
+const runConvert = (
+  code: string,
+  mode: "values" | "object" = "values",
+  idx: "auto" | "always" | "never" = "auto",
+): ConvertResult => {
+  py.globals.set("_pygrid_code", code);
+  py.globals.set("_pygrid_output_mode", mode);
+  py.globals.set("_pygrid_include_index", idx);
+  return JSON.parse(
+    py.runPython(
+      "_pygrid_run_convert(_pygrid_code, _pygrid_output_mode, _pygrid_include_index)",
+    ) as string,
+  ) as ConvertResult;
+};
+
+const extractRefs = (code: string): { ok: boolean; refs?: string[]; message?: string } => {
+  py.globals.set("_pygrid_code", code);
+  return JSON.parse(py.runPython("_pygrid_extract_refs(_pygrid_code)") as string);
+};
+
+beforeAll(async () => {
+  py = await loadPyodide({
+    packageCacheDir: path.resolve("node_modules/.pyodide-cache"),
+  });
+  await py.loadPackage(["numpy", "pandas", "matplotlib"]);
+  for (const f of ["bootstrap.py", "xl.py", "convert.py"]) {
+    py.runPython(readFileSync(path.resolve("lib/runtime/py", f), "utf8"));
+  }
+  // Node에는 /fonts가 없으므로 폰트 등록은 건너뛰고 Agg 백엔드만 적용된다
+  py.runPython("import matplotlib; _pygrid_mpl_setup()");
+}, 600_000);
+
+afterAll(() => {
+  writeFileSync(
+    path.resolve("output/conversion-report.json"),
+    JSON.stringify(results, null, 2),
+  );
+});
+
+// ── §3.3 입력 행 ─────────────────────────────────────────
+
+row("입력 t:'n' — 열 전체 정수 → int64", () => {
+  inject({ "A1:A3": { values: [[1], [2], [3]], types: [["n"], ["n"], ["n"]], scalar: false } });
+  expect(pyEval('str(xl("A1:A3")[0].dtype)')).toBe("int64");
+  expect(pyEval('list(xl("A1:A3")[0]) == [1, 2, 3]')).toBe(true);
+});
+
+row("입력 t:'n' — 소수 혼재 → float64", () => {
+  inject({ "A1:A2": { values: [[1], [2.5]], types: [["n"], ["n"]], scalar: false } });
+  expect(pyEval('str(xl("A1:A2")[0].dtype)')).toBe("float64");
+});
+
+row("입력 t:'s' → str(object)", () => {
+  inject({ "B1:B2": { values: [["가"], ["나"]], types: [["s"], ["s"]], scalar: false } });
+  expect(pyEval('str(xl("B1:B2")[0].dtype)')).toBe("object");
+  expect(pyEval('list(xl("B1:B2")[0]) == ["가", "나"]')).toBe(true);
+});
+
+row("입력 t:'b' → bool", () => {
+  inject({ "C1:C2": { values: [[true], [false]], types: [["b"], ["b"]], scalar: false } });
+  expect(pyEval('str(xl("C1:C2")[0].dtype)')).toBe("bool");
+});
+
+row("입력 t:'d' → datetime64[ns] (Timestamp)", () => {
+  inject({
+    "D1:D2": { values: [["2026-09-02"], ["2026-09-03"]], types: [["d"], ["d"]], scalar: false },
+  });
+  expect(pyEval('str(xl("D1:D2")[0].dtype)')).toBe("datetime64[ns]");
+  expect(pyEval('xl("D1:D2")[0].iloc[0].day')).toBe(2);
+});
+
+row("입력 빈 셀 → NaN/NaT/None (경계 케이스 #1)", () => {
+  inject({
+    "E1:E3": { values: [[1], [null], [3]], types: [["n"], ["s"], ["n"]], scalar: false },
+    "F1:F2": { values: [["2026-09-02"], [null]], types: [["d"], ["s"]], scalar: false },
+    "G1:G2": { values: [["가"], [null]], types: [["s"], ["s"]], scalar: false },
+  });
+  // 정수열 + 빈 셀 → int64 불가, float64 + NaN
+  expect(pyEval('str(xl("E1:E3")[0].dtype)')).toBe("float64");
+  expect(pyEval('import pandas as pd; bool(pd.isna(xl("E1:E3")[0].iloc[1]))')).toBe(true);
+  expect(pyEval('bool(pd.isna(xl("F1:F2")[0].iloc[1]))')).toBe(true); // NaT
+  expect(pyEval('xl("G1:G2")[0].iloc[1] is None')).toBe(true);
+});
+
+row("입력 단일 셀 xl('A1') → 스칼라", () => {
+  inject({
+    A1: { values: [[5]], types: [["n"]], scalar: true },
+    D1: { values: [["2026-09-02"]], types: [["d"]], scalar: true },
+    N1: { values: [[null]], types: [["s"]], scalar: true },
+  });
+  expect(pyEval('xl("A1")')).toBe(5);
+  expect(pyEval('type(xl("D1")).__name__')).toBe("Timestamp");
+  expect(pyEval('xl("N1") is None')).toBe(true);
+});
+
+// ── §3.3 출력 행 (값 모드) ───────────────────────────────
+
+row("출력 스칼라 → 1셀 (None→빈 셀, bool→'b')", () => {
+  expect(runConvert("42").cells).toEqual([[{ v: 42, t: "n" }]]);
+  expect(runConvert("42").kind).toBe("scalar");
+  expect(runConvert("None").cells).toEqual([[{ v: null, t: "s" }]]);
+  expect(runConvert("True").cells).toEqual([[{ v: true, t: "b" }]]);
+  expect(runConvert('"텍스트"').cells).toEqual([[{ v: "텍스트", t: "s" }]]);
+});
+
+row("출력 list/1D ndarray/Series → 세로 1열 (Series name은 헤더)", () => {
+  expect(runConvert("[1, 2, 3]").cells).toEqual([
+    [{ v: 1, t: "n" }],
+    [{ v: 2, t: "n" }],
+    [{ v: 3, t: "n" }],
+  ]);
+  expect(runConvert("import numpy as np\nnp.array([1.5, 2.5])").cells).toEqual([
+    [{ v: 1.5, t: "n" }],
+    [{ v: 2.5, t: "n" }],
+  ]);
+  const named = runConvert('import pandas as pd\npd.Series([1, 2], name="점수")');
+  expect(named.cells).toEqual([[{ v: "점수", t: "s" }], [{ v: 1, t: "n" }], [{ v: 2, t: "n" }]]);
+  const unnamed = runConvert("import pandas as pd\npd.Series([1, 2])");
+  expect(unnamed.cells).toHaveLength(2);
+});
+
+row("출력 중첩 list/2D ndarray → 2D spill", () => {
+  expect(runConvert('[[1, "a"], [2, "b"]]').cells).toEqual([
+    [
+      { v: 1, t: "n" },
+      { v: "a", t: "s" },
+    ],
+    [
+      { v: 2, t: "n" },
+      { v: "b", t: "s" },
+    ],
+  ]);
+  const nd = runConvert("import numpy as np\nnp.arange(4).reshape(2, 2)");
+  expect(nd.shape).toEqual([2, 2]);
+  expect(nd.kind).toBe("table");
+});
+
+row("출력 DataFrame → 헤더+값, includeIndex auto/always/never", () => {
+  const code = 'import pandas as pd\npd.DataFrame({"a": [1, 2], "b": [3.5, None]})';
+  const auto = runConvert(code);
+  // 기본 RangeIndex → auto에서 제외 (경계 케이스 #3), NaN → 빈 셀
+  expect(auto.cells?.[0]).toEqual([
+    { v: "a", t: "s" },
+    { v: "b", t: "s" },
+  ]);
+  expect(auto.cells?.[2]).toEqual([
+    { v: 2, t: "n" },
+    { v: null, t: "s" },
+  ]);
+  const always = runConvert(code, "values", "always");
+  expect(always.cells?.[0]).toEqual([
+    { v: "", t: "s" },
+    { v: "a", t: "s" },
+    { v: "b", t: "s" },
+  ]);
+  expect(always.cells?.[1]?.[0]).toEqual({ v: 0, t: "n" });
+
+  const namedIdx =
+    'import pandas as pd\npd.DataFrame({"a": [1, 2]}, index=pd.Index(["x", "y"], name="k"))';
+  expect(runConvert(namedIdx).cells?.[0]).toEqual([
+    { v: "k", t: "s" },
+    { v: "a", t: "s" },
+  ]); // 비기본 index → auto에서 포함
+  expect(runConvert(namedIdx, "values", "never").cells?.[0]).toEqual([{ v: "a", t: "s" }]);
+});
+
+row("출력 dict → 2열(키·값)", () => {
+  expect(runConvert('{"a": 1, "나": 2.5}').cells).toEqual([
+    [
+      { v: "a", t: "s" },
+      { v: 1, t: "n" },
+    ],
+    [
+      { v: "나", t: "s" },
+      { v: 2.5, t: "n" },
+    ],
+  ]);
+});
+
+row("출력 datetime/Timestamp → t:'d' ISO + 서식", () => {
+  expect(runConvert('import pandas as pd\npd.Timestamp("2026-09-02")').cells).toEqual([
+    [{ v: "2026-09-02", t: "d", f: "yyyy-mm-dd" }],
+  ]);
+  expect(runConvert('import datetime\ndatetime.datetime(2026, 9, 2, 10, 30)').cells).toEqual([
+    [{ v: "2026-09-02 10:30:00", t: "d", f: "yyyy-mm-dd hh:mm:ss" }],
+  ]);
+});
+
+row("출력 Figure → 값 모드 오류 / 객체 모드 PNG dpi150", () => {
+  const err = runConvert("import matplotlib.pyplot as plt\n_f = plt.figure()\n_f");
+  expect(err.ok).toBe(false);
+  expect(err.etype).toBe("PyGridImageError");
+  expect(err.msg).toBe("이미지는 값으로 펼칠 수 없습니다");
+
+  const img = runConvert(
+    'import matplotlib.pyplot as plt\n_fig, _ax = plt.subplots()\n_ax.set_title("한글 제목")\n_ax.plot([1, 2], [3, 4])\n_fig',
+    "object",
+  );
+  expect(img.ok).toBe(true);
+  expect(img.kind).toBe("image");
+  expect(img.preview).toEqual({ kind: "image" });
+  expect((img.pngB64 ?? "").length).toBeGreaterThan(1000);
+  // PNG 시그니처(base64 "iVBORw0KGgo")
+  expect(img.pngB64?.startsWith("iVBORw0KGgo")).toBe(true);
+});
+
+row("출력 그 외 객체 → 값 모드 str() 1셀 / 객체 모드 repr 카드", () => {
+  const vals = runConvert("{1, 2}");
+  expect(vals.cells?.[0]?.[0]?.t).toBe("s");
+  expect(vals.cells?.[0]?.[0]?.v).toBe("{1, 2}");
+  const obj = runConvert("{1, 2}", "object");
+  expect(obj.kind).toBe("object");
+  expect(obj.typeName).toBe("set");
+  expect(obj.preview?.kind).toBe("repr");
+  expect(obj.preview?.repr).toBe("{1, 2}");
+});
+
+// ── 골든 G2 + analyze + 안전망 ───────────────────────────
+
+function g2Snapshot(): RangeSnapshot {
+  const values: (string | number | boolean | null)[][] = [
+    ["id", "금액", "비율", "날짜", "이름", "메모"],
+  ];
+  const types: CellType[][] = [["s", "s", "s", "s", "s", "s"]];
+  for (let i = 1; i <= 20; i++) {
+    const noRatio = i % 7 === 0;
+    const noDate = i % 9 === 0;
+    const noMemo = i % 3 === 0;
+    values.push([
+      i,
+      i * 1000 + 0.5,
+      noRatio ? null : i / 100,
+      noDate ? null : `2026-01-${String(i).padStart(2, "0")}`,
+      `이름${i}`,
+      noMemo ? null : `메모${i}`,
+    ]);
+    types.push(["n", "n", noRatio ? "s" : "n", noDate ? "s" : "d", "s", "s"]);
+  }
+  return { values, types, scalar: false };
+}
+
+row("G2: xl('A1:F21', headers=True) 골든 dtype + NaN/NaT", () => {
+  inject({ "A1:F21": g2Snapshot() });
+  py.runPython('_g2 = xl("A1:F21", headers=True)');
+  expect(pyEval("_g2.shape == (20, 6)")).toBe(true);
+  expect(pyEval('str(_g2["id"].dtype)')).toBe("int64");
+  expect(pyEval('str(_g2["금액"].dtype)')).toBe("float64");
+  expect(pyEval('str(_g2["비율"].dtype)')).toBe("float64");
+  expect(pyEval('str(_g2["날짜"].dtype)')).toBe("datetime64[ns]");
+  expect(pyEval('str(_g2["이름"].dtype)')).toBe("object");
+  expect(pyEval('int(_g2["비율"].isna().sum())')).toBe(2); // 7, 14
+  expect(pyEval('int(_g2["날짜"].isna().sum())')).toBe(2); // 9, 18
+  expect(pyEval('_g2["메모"].iloc[2] is None')).toBe(true); // 3행
+});
+
+row("extract_refs: 리터럴 추출·중복 제거·순서 유지", () => {
+  const r = extractRefs('a = xl("A1")\nb = xl("B1:B5", headers=True)\nc = xl("A1")');
+  expect(r).toEqual({ ok: true, refs: ["A1", "B1:B5"] });
+  expect(extractRefs("print(1)")).toEqual({ ok: true, refs: [] });
+});
+
+row("extract_refs: 비리터럴 인수 → 한국어 오류 (§2.4)", () => {
+  const r = extractRefs('ref = "A1"\nxl(ref)');
+  expect(r.ok).toBe(false);
+  expect(r.message).toBe("xl() 인수는 문자열 리터럴이어야 합니다");
+  expect(extractRefs('xl(f"A{n}")').ok).toBe(false);
+  expect(extractRefs("xl()").ok).toBe(false);
+  const h = extractRefs('xl("A1", headers=h)');
+  expect(h.ok).toBe(false);
+  expect(h.message).toBe("xl() headers 인수는 True/False 리터럴이어야 합니다");
+});
+
+row("xl 미주입 참조 → RuntimeError 안전망", () => {
+  py.runPython("_pygrid_xl_cache.clear()");
+  const r = runConvert('xl("Z9")');
+  expect(r.ok).toBe(false);
+  expect(r.etype).toBe("RuntimeError");
+  expect(r.msg).toContain("준비되지 않았습니다");
+});
+
+row("객체 모드 DataFrame → table preview 상위 100행 + dtypes + NaN null", () => {
+  const r = runConvert(
+    'import pandas as pd\nimport numpy as np\npd.DataFrame({"x": np.arange(120.0), "y": [np.nan] * 120})',
+    "object",
+  );
+  expect(r.kind).toBe("table");
+  expect(r.typeName).toBe("DataFrame");
+  expect(r.shape).toEqual([120, 2]);
+  expect(r.preview?.kind).toBe("table");
+  expect(r.preview?.columns).toEqual(["x", "y"]);
+  expect(r.preview?.dtypes).toEqual(["float64", "float64"]);
+  expect(r.preview?.rows).toHaveLength(100);
+  expect(r.preview?.rows?.[0]).toEqual([0, null]);
+});

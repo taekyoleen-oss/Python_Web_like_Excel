@@ -31,27 +31,47 @@ def _pygrid_mpl_setup():
         pass  # 폰트 실패는 실행을 막지 않는다(차트 한글이 □로 보일 뿐)
 
 
+def _pygrid_exec_capture(code):
+    """코드 본문을 exec하고 마지막 문장이 표현식이면 eval해 그 값을 돌려준다.
+
+    _pygrid_run(REPL, repr)과 convert.py의 _pygrid_run_convert(블록 실행)가 공유한다.
+    """
+    import ast
+
+    g = globals()
+    tree = ast.parse(code, filename="<pygrid>", mode="exec")
+    last = None
+    if tree.body and isinstance(tree.body[-1], ast.Expr):
+        last = tree.body.pop()
+    exec(compile(tree, "<pygrid>", "exec"), g)
+    if last is None:
+        return None
+    return eval(compile(ast.Expression(last.value), "<pygrid>", "eval"), g)
+
+
+def _pygrid_format_exc(e):
+    """래퍼 프레임을 지우고 사용자 코드("<pygrid>")부터 보여주는 트레이스백 문자열."""
+    import traceback
+
+    if isinstance(e, SyntaxError):
+        return "".join(traceback.format_exception_only(e))
+    tb = e.__traceback__
+    while tb is not None and tb.tb_frame.f_code.co_filename != "<pygrid>":
+        tb = tb.tb_next
+    return "".join(traceback.format_exception(e.with_traceback(tb or e.__traceback__)))
+
+
 def _pygrid_run(code):
-    """코드 실행: 본문을 exec하고 마지막 문장이 표현식이면 eval해 repr을 캡처한다.
+    """REPL용 실행: 마지막 표현식의 repr 캡처.
 
     반환(JSON 문자열):
       성공 {"ok": true, "repr": str|null, "type": str|null}  (None 결과 → repr null)
       실패 {"ok": false, "etype": 예외 클래스명, "msg": str, "tb": 트레이스백}
     """
-    import ast
     import json
-    import traceback
 
-    g = globals()
     try:
-        tree = ast.parse(code, filename="<pygrid>", mode="exec")
-        last = None
-        if tree.body and isinstance(tree.body[-1], ast.Expr):
-            last = tree.body.pop()
-        exec(compile(tree, "<pygrid>", "exec"), g)
-        value = None
-        if last is not None:
-            value = eval(compile(ast.Expression(last.value), "<pygrid>", "eval"), g)
+        value = _pygrid_exec_capture(code)
         if value is None:
             return json.dumps({"ok": True, "repr": None, "type": None})
         return json.dumps(
@@ -59,18 +79,8 @@ def _pygrid_run(code):
             ensure_ascii=False,
         )
     except BaseException as e:  # KeyboardInterrupt(중단)도 실행 실패로 보고한다
-        if isinstance(e, SyntaxError):
-            tb_text = "".join(traceback.format_exception_only(e))
-        else:
-            # 이 래퍼 프레임을 지우고 사용자 코드("<pygrid>")부터 보여준다
-            tb = e.__traceback__
-            while tb is not None and tb.tb_frame.f_code.co_filename != "<pygrid>":
-                tb = tb.tb_next
-            tb_text = "".join(
-                traceback.format_exception(e.with_traceback(tb or e.__traceback__))
-            )
         return json.dumps(
-            {"ok": False, "etype": type(e).__name__, "msg": str(e), "tb": tb_text},
+            {"ok": False, "etype": type(e).__name__, "msg": str(e), "tb": _pygrid_format_exc(e)},
             ensure_ascii=False,
         )
 
@@ -124,3 +134,6 @@ def _pygrid_reset():
         if name in keep or name.startswith("_pygrid"):
             continue
         del g[name]
+    # xl()은 공개 이름이라 위에서 지워지므로 복구한다 (xl.py가 _pygrid_xl로도 정의)
+    if "_pygrid_xl" in g:
+        g["xl"] = g["_pygrid_xl"]
