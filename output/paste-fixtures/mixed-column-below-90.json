@@ -1,0 +1,43 @@
+{
+ "name": "mixed-column-below-90",
+ "description": "숫자 60%뿐인 열 → 전체 문자열 유지",
+ "clipboard": {
+  "text/plain": "1\r\n2\r\n3\r\nabc\r\ndef\r\n",
+  "text/html": "<table><tr><td>1</td></tr><tr><td>2</td></tr><tr><td>3</td></tr><tr><td>abc</td></tr><tr><td>def</td></tr></table>"
+ },
+ "expected": {
+  "headerRow": false,
+  "cells": [
+   [
+    {
+     "v": "1",
+     "t": "s"
+    }
+   ],
+   [
+    {
+     "v": "2",
+     "t": "s"
+    }
+   ],
+   [
+    {
+     "v": "3",
+     "t": "s"
+    }
+   ],
+   [
+    {
+     "v": "abc",
+     "t": "s"
+    }
+   ],
+   [
+    {
+     "v": "def",
+     "t": "s"
+    }
+   ]
+  ]
+ }
+}

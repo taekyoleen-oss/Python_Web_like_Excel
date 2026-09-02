@@ -1,0 +1,43 @@
+{
+ "name": "header-detection",
+ "description": "첫 행 문자열 + 본문 숫자 → headerRow 제안",
+ "clipboard": {
+  "text/plain": "이름\t나이\r\n철수\t20\r\n영희\t21\r\n",
+  "text/html": "<table><tr><td>이름</td><td>나이</td></tr><tr><td>철수</td><td>20</td></tr><tr><td>영희</td><td>21</td></tr></table>"
+ },
+ "expected": {
+  "headerRow": true,
+  "cells": [
+   [
+    {
+     "v": "이름",
+     "t": "s"
+    },
+    {
+     "v": "나이",
+     "t": "s"
+    }
+   ],
+   [
+    {
+     "v": "철수",
+     "t": "s"
+    },
+    {
+     "v": 20,
+     "t": "n"
+    }
+   ],
+   [
+    {
+     "v": "영희",
+     "t": "s"
+    },
+    {
+     "v": 21,
+     "t": "n"
+    }
+   ]
+  ]
+ }
+}

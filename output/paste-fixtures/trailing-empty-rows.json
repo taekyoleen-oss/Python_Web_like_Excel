@@ -1,0 +1,25 @@
+{
+ "name": "trailing-empty-rows",
+ "description": "후행 빈 행 제거",
+ "clipboard": {
+  "text/plain": "1\r\n2\r\n\r\n\r\n",
+  "text/html": "<table><tr><td>1</td></tr><tr><td>2</td></tr><tr><td></td></tr><tr><td></td></tr></table>"
+ },
+ "expected": {
+  "headerRow": false,
+  "cells": [
+   [
+    {
+     "v": 1,
+     "t": "n"
+    }
+   ],
+   [
+    {
+     "v": 2,
+     "t": "n"
+    }
+   ]
+  ]
+ }
+}

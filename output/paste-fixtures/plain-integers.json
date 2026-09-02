@@ -1,0 +1,43 @@
+{
+ "name": "plain-integers",
+ "description": "정수만 있는 3×2 표",
+ "clipboard": {
+  "text/plain": "1\t2\r\n3\t4\r\n5\t6\r\n",
+  "text/html": "<table><tr><td>1</td><td>2</td></tr><tr><td>3</td><td>4</td></tr><tr><td>5</td><td>6</td></tr></table>"
+ },
+ "expected": {
+  "headerRow": false,
+  "cells": [
+   [
+    {
+     "v": 1,
+     "t": "n"
+    },
+    {
+     "v": 2,
+     "t": "n"
+    }
+   ],
+   [
+    {
+     "v": 3,
+     "t": "n"
+    },
+    {
+     "v": 4,
+     "t": "n"
+    }
+   ],
+   [
+    {
+     "v": 5,
+     "t": "n"
+    },
+    {
+     "v": 6,
+     "t": "n"
+    }
+   ]
+  ]
+ }
+}

@@ -1,0 +1,27 @@
+{
+ "name": "single-row",
+ "description": "1행",
+ "clipboard": {
+  "text/plain": "a\tb\tc\r\n",
+  "text/html": "<table><tr><td>a</td><td>b</td><td>c</td></tr></table>"
+ },
+ "expected": {
+  "headerRow": false,
+  "cells": [
+   [
+    {
+     "v": "a",
+     "t": "s"
+    },
+    {
+     "v": "b",
+     "t": "s"
+    },
+    {
+     "v": "c",
+     "t": "s"
+    }
+   ]
+  ]
+ }
+}

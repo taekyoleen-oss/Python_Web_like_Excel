@@ -1,0 +1,33 @@
+{
+ "name": "html-newline-cell",
+ "description": "HTML <br> 셀 — 경계는 HTML, 값은 줄바꿈 유지",
+ "clipboard": {
+  "text/plain": "\"보험\n계리\"\t10\r\n통계\t20\r\n",
+  "text/html": "<table><tr><td>보험<br>계리</td><td>10</td></tr><tr><td>통계</td><td>20</td></tr></table>"
+ },
+ "expected": {
+  "headerRow": false,
+  "cells": [
+   [
+    {
+     "v": "보험\n계리",
+     "t": "s"
+    },
+    {
+     "v": 10,
+     "t": "n"
+    }
+   ],
+   [
+    {
+     "v": "통계",
+     "t": "s"
+    },
+    {
+     "v": 20,
+     "t": "n"
+    }
+   ]
+  ]
+ }
+}

@@ -1,0 +1,32 @@
+{
+ "name": "quoted-tsv-newline",
+ "description": "따옴표로 감싼 줄바꿈 셀 (TSV만)",
+ "clipboard": {
+  "text/plain": "\"보험\n계리\"\t1\r\n통계\t2\r\n"
+ },
+ "expected": {
+  "headerRow": false,
+  "cells": [
+   [
+    {
+     "v": "보험\n계리",
+     "t": "s"
+    },
+    {
+     "v": 1,
+     "t": "n"
+    }
+   ],
+   [
+    {
+     "v": "통계",
+     "t": "s"
+    },
+    {
+     "v": 2,
+     "t": "n"
+    }
+   ]
+  ]
+ }
+}

@@ -1,0 +1,31 @@
+{
+ "name": "single-column",
+ "description": "1열",
+ "clipboard": {
+  "text/plain": "a\r\nb\r\nc\r\n",
+  "text/html": "<table><tr><td>a</td></tr><tr><td>b</td></tr><tr><td>c</td></tr></table>"
+ },
+ "expected": {
+  "headerRow": false,
+  "cells": [
+   [
+    {
+     "v": "a",
+     "t": "s"
+    }
+   ],
+   [
+    {
+     "v": "b",
+     "t": "s"
+    }
+   ],
+   [
+    {
+     "v": "c",
+     "t": "s"
+    }
+   ]
+  ]
+ }
+}

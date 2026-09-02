@@ -1,0 +1,19 @@
+{
+ "name": "single-cell",
+ "description": "단일 셀 붙여넣기",
+ "clipboard": {
+  "text/plain": "42\r\n",
+  "text/html": "<table><tr><td>42</td></tr></table>"
+ },
+ "expected": {
+  "headerRow": false,
+  "cells": [
+   [
+    {
+     "v": 42,
+     "t": "n"
+    }
+   ]
+  ]
+ }
+}

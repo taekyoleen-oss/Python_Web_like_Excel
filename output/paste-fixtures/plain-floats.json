@@ -1,0 +1,33 @@
+{
+ "name": "plain-floats",
+ "description": "소수 열",
+ "clipboard": {
+  "text/plain": "1.5\t2.25\r\n-0.5\t3.0\r\n",
+  "text/html": "<table><tr><td>1.5</td><td>2.25</td></tr><tr><td>-0.5</td><td>3.0</td></tr></table>"
+ },
+ "expected": {
+  "headerRow": false,
+  "cells": [
+   [
+    {
+     "v": 1.5,
+     "t": "n"
+    },
+    {
+     "v": 2.25,
+     "t": "n"
+    }
+   ],
+   [
+    {
+     "v": -0.5,
+     "t": "n"
+    },
+    {
+     "v": 3.0,
+     "t": "n"
+    }
+   ]
+  ]
+ }
+}

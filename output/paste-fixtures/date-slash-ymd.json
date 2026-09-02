@@ -1,0 +1,27 @@
+{
+ "name": "date-slash-ymd",
+ "description": "연/월/일 슬래시(기본 ymd)",
+ "clipboard": {
+  "text/plain": "2026/09/02\r\n2025/01/31\r\n",
+  "text/html": "<table><tr><td>2026/09/02</td></tr><tr><td>2025/01/31</td></tr></table>"
+ },
+ "expected": {
+  "headerRow": false,
+  "cells": [
+   [
+    {
+     "v": "2026-09-02",
+     "t": "d",
+     "f": "yyyy-mm-dd"
+    }
+   ],
+   [
+    {
+     "v": "2025-01-31",
+     "t": "d",
+     "f": "yyyy-mm-dd"
+    }
+   ]
+  ]
+ }
+}

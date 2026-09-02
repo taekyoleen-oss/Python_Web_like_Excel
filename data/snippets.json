@@ -1,0 +1,32 @@
+[
+ {
+  "name": "기술통계",
+  "description": "선택 범위의 개수·평균·표준편차·사분위수",
+  "code": "df = {{range}}\ndf.describe()"
+ },
+ {
+  "name": "그룹 집계",
+  "description": "열 기준 그룹 합계 (열 이름을 바꿔 쓰세요)",
+  "code": "df = {{range}}\ndf.groupby(\"그룹열\").sum(numeric_only=True)"
+ },
+ {
+  "name": "피벗 테이블",
+  "description": "행×열 교차 집계",
+  "code": "df = {{range}}\ndf.pivot_table(index=\"행열\", columns=\"열열\", values=\"값열\", aggfunc=\"sum\")"
+ },
+ {
+  "name": "히스토그램",
+  "description": "숫자 열 분포 그래프 (객체 모드로 실행)",
+  "code": "df = {{range}}\nfig, ax = plt.subplots(figsize=(7, 4))\nax.hist(df.iloc[:, 0], bins=20, color=\"#4A90C2\")\nfig"
+ },
+ {
+  "name": "선형회귀",
+  "description": "첫 두 숫자 열로 기울기·절편 추정",
+  "code": "df = {{range}}\nx, y = df.iloc[:, 0], df.iloc[:, 1]\nslope, intercept = np.polyfit(x, y, 1)\npd.DataFrame({\"기울기\": [slope], \"절편\": [intercept]})"
+ },
+ {
+  "name": "생명표 lx 계산",
+  "description": "x·qx 두 열에서 생존자 수 lx 계산 (기수 100,000)",
+  "code": "df = {{range}}\nlx = [100000.0]\nfor q in df[\"qx\"][:-1]:\n    lx.append(lx[-1] * (1 - q))\ndf[\"lx\"] = lx\ndf"
+ }
+]

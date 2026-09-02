@@ -1,0 +1,22 @@
+{
+ "name": "quoted-tsv-quotes",
+ "description": "이스케이프된 따옴표 \"\" (TSV만)",
+ "clipboard": {
+  "text/plain": "\"그는 \"\"안녕\"\"이라 말했다\"\t1\r\n"
+ },
+ "expected": {
+  "headerRow": false,
+  "cells": [
+   [
+    {
+     "v": "그는 \"안녕\"이라 말했다",
+     "t": "s"
+    },
+    {
+     "v": 1,
+     "t": "n"
+    }
+   ]
+  ]
+ }
+}

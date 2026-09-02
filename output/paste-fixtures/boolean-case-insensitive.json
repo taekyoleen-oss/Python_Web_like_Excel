@@ -1,0 +1,31 @@
+{
+ "name": "boolean-case-insensitive",
+ "description": "대소문자 무시 True/false",
+ "clipboard": {
+  "text/plain": "True\r\nfalse\r\nTRUE\r\n",
+  "text/html": "<table><tr><td>True</td></tr><tr><td>false</td></tr><tr><td>TRUE</td></tr></table>"
+ },
+ "expected": {
+  "headerRow": false,
+  "cells": [
+   [
+    {
+     "v": true,
+     "t": "b"
+    }
+   ],
+   [
+    {
+     "v": false,
+     "t": "b"
+    }
+   ],
+   [
+    {
+     "v": true,
+     "t": "b"
+    }
+   ]
+  ]
+ }
+}

@@ -1,0 +1,33 @@
+{
+ "name": "whitespace-padding",
+ "description": "앞뒤 공백은 추론 전에 trim",
+ "clipboard": {
+  "text/plain": " 1 \t abc \r\n2\tdef\r\n",
+  "text/html": "<table><tr><td> 1 </td><td> abc </td></tr><tr><td>2</td><td>def</td></tr></table>"
+ },
+ "expected": {
+  "headerRow": false,
+  "cells": [
+   [
+    {
+     "v": 1,
+     "t": "n"
+    },
+    {
+     "v": "abc",
+     "t": "s"
+    }
+   ],
+   [
+    {
+     "v": 2,
+     "t": "n"
+    },
+    {
+     "v": "def",
+     "t": "s"
+    }
+   ]
+  ]
+ }
+}

@@ -1,0 +1,31 @@
+{
+ "name": "negative-numbers",
+ "description": "음수 표기",
+ "clipboard": {
+  "text/plain": "-1\r\n-2.5\r\n-100\r\n",
+  "text/html": "<table><tr><td>-1</td></tr><tr><td>-2.5</td></tr><tr><td>-100</td></tr></table>"
+ },
+ "expected": {
+  "headerRow": false,
+  "cells": [
+   [
+    {
+     "v": -1,
+     "t": "n"
+    }
+   ],
+   [
+    {
+     "v": -2.5,
+     "t": "n"
+    }
+   ],
+   [
+    {
+     "v": -100,
+     "t": "n"
+    }
+   ]
+  ]
+ }
+}

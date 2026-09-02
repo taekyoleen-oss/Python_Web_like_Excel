@@ -1,0 +1,31 @@
+{
+ "name": "boolean-truefalse",
+ "description": "TRUE/FALSE 열",
+ "clipboard": {
+  "text/plain": "TRUE\r\nFALSE\r\nTRUE\r\n",
+  "text/html": "<table><tr><td>TRUE</td></tr><tr><td>FALSE</td></tr><tr><td>TRUE</td></tr></table>"
+ },
+ "expected": {
+  "headerRow": false,
+  "cells": [
+   [
+    {
+     "v": true,
+     "t": "b"
+    }
+   ],
+   [
+    {
+     "v": false,
+     "t": "b"
+    }
+   ],
+   [
+    {
+     "v": true,
+     "t": "b"
+    }
+   ]
+  ]
+ }
+}

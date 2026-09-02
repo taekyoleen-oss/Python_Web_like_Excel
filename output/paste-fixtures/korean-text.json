@@ -1,0 +1,31 @@
+{
+ "name": "korean-text",
+ "description": "한글 텍스트 열",
+ "clipboard": {
+  "text/plain": "보험계리\r\n손해율\r\n생명표\r\n",
+  "text/html": "<table><tr><td>보험계리</td></tr><tr><td>손해율</td></tr><tr><td>생명표</td></tr></table>"
+ },
+ "expected": {
+  "headerRow": false,
+  "cells": [
+   [
+    {
+     "v": "보험계리",
+     "t": "s"
+    }
+   ],
+   [
+    {
+     "v": "손해율",
+     "t": "s"
+    }
+   ],
+   [
+    {
+     "v": "생명표",
+     "t": "s"
+    }
+   ]
+  ]
+ }
+}

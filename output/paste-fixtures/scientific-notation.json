@@ -1,0 +1,31 @@
+{
+ "name": "scientific-notation",
+ "description": "지수 표기",
+ "clipboard": {
+  "text/plain": "1.2e5\r\n3E2\r\n-1.5e-3\r\n",
+  "text/html": "<table><tr><td>1.2e5</td></tr><tr><td>3E2</td></tr><tr><td>-1.5e-3</td></tr></table>"
+ },
+ "expected": {
+  "headerRow": false,
+  "cells": [
+   [
+    {
+     "v": 120000.0,
+     "t": "n"
+    }
+   ],
+   [
+    {
+     "v": 300.0,
+     "t": "n"
+    }
+   ],
+   [
+    {
+     "v": -0.0015,
+     "t": "n"
+    }
+   ]
+  ]
+ }
+}
