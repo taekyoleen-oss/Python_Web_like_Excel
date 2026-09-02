@@ -144,6 +144,27 @@ describe("워크북 스토어", () => {
     expect(store.getState().workbook.sheets).toHaveLength(1);
   });
 
+  it("addSheetWithCells: 시트 생성+채우기가 undo 한 번에 되돌아간다", async () => {
+    const { store, sheetId } = fresh();
+    store.getState().setCellValue(sheetId, 0, 0, { v: 1, t: "n" });
+    await sleep(350);
+    store.getState().addSheetWithCells([
+      { r: 0, c: 0, cell: { v: "x", t: "s" } },
+      { r: 250, c: 30, cell: { v: 2, t: "n" } }, // rowCount/colCount 자동 확장
+    ]);
+    await sleep(350);
+    const wb = store.getState().workbook;
+    expect(wb.sheets).toHaveLength(2);
+    expect(wb.sheets[1].cells["0:0"]).toEqual({ v: "x", t: "s" });
+    expect(wb.sheets[1].rowCount).toBe(251);
+    expect(wb.sheets[1].colCount).toBe(31);
+    expect(store.getState().activeSheetId).toBe(wb.sheets[1].id);
+
+    store.temporal.getState().undo();
+    expect(store.getState().workbook.sheets).toHaveLength(1);
+    expect(store.getState().workbook.sheets[0].cells["0:0"]).toEqual({ v: 1, t: "n" });
+  });
+
   it("newWorkbook/loadWorkbook은 이력을 초기화한다", async () => {
     const { store, sheetId } = fresh();
     store.getState().setCellValue(sheetId, 0, 0, { v: 1, t: "n" });

@@ -66,6 +66,8 @@ export interface WorkbookState {
   deleteRows: (sheetId: string, index: number, count: number) => void;
   deleteCols: (sheetId: string, index: number, count: number) => void;
   addSheet: () => void;
+  /** 새 시트 생성 + 셀 채우기를 한 트랜잭션(= 한 undo 단계)으로 */
+  addSheetWithCells: (edits: CellEdit[]) => void;
   renameSheet: (sheetId: string, name: string) => void;
   removeSheet: (sheetId: string) => void;
   moveSheet: (sheetId: string, offset: number) => void;
@@ -248,6 +250,23 @@ export const createWorkbookStore = () => {
               const sheet = createSheet(`Sheet${i}`);
               state.workbook.sheets.push(sheet);
               state.activeSheetId = sheet.id;
+            }),
+
+          addSheetWithCells: (edits) =>
+            set((state) => {
+              const names = new Set(state.workbook.sheets.map((s) => s.name));
+              let i = state.workbook.sheets.length + 1;
+              while (names.has(`Sheet${i}`)) i++;
+              const sheet = createSheet(`Sheet${i}`);
+              for (const { r, c, cell } of edits) {
+                if (cell === null) continue;
+                sheet.cells[cellKey(r, c)] = cell;
+                if (r >= sheet.rowCount) sheet.rowCount = r + 1;
+                if (c >= sheet.colCount) sheet.colCount = c + 1;
+              }
+              state.workbook.sheets.push(sheet);
+              state.activeSheetId = sheet.id;
+              state.selection = null;
             }),
 
           renameSheet: (sheetId, name) => {

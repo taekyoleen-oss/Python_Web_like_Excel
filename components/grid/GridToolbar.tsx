@@ -2,7 +2,7 @@
 
 // 그리드 툴바 — 행/열 삽입·삭제, 열 고정, 정렬 + 후속 마일스톤 자리표시 버튼
 
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
   ClipboardText,
   Play,
@@ -12,15 +12,120 @@ import {
   SortDescending,
   Stop,
 } from "@phosphor-icons/react";
+import { startPasteFlow } from "@/components/grid/PasteImportDialog";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Separator } from "@/components/ui/separator";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import type { DateOrder } from "@/lib/grid/clipboard/infer";
+import { parseClipboard } from "@/lib/grid/clipboard/parse";
 import { useWorkbookStore, type CellEdit } from "@/lib/grid/model";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { loadSettings, saveSettings } from "@/lib/storage/db";
 import { cellKey, parseCellKey, type Cell } from "@/types/workbook";
+
+/** 텍스트로 붙여넣기 폴백 (모바일·클립보드 권한 차단 환경) + 항상 미리보기 설정 */
+function PasteOptionsDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [value, setValue] = useState("");
+  const [alwaysDialog, setAlwaysDialog] = useState(false);
+  const [dateOrder, setDateOrder] = useState<DateOrder>("ymd");
+
+  // 열릴 때 설정 한 번 로드
+  useEffect(() => {
+    if (open) {
+      void loadSettings().then((s) => {
+        setAlwaysDialog(s?.pasteAlwaysDialog ?? false);
+        setDateOrder(s?.dateOrder ?? "ymd");
+      });
+    }
+  }, [open]);
+
+  const paste = () => {
+    const raw = parseClipboard({ text: value });
+    if (raw.length > 0) void startPasteFlow(raw);
+    setValue("");
+    onClose();
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>텍스트로 붙여넣기</DialogTitle>
+          <DialogDescription>
+            클립보드 권한이 막힌 환경에서는 아래에 표를 직접 붙여넣으세요 (탭 구분).
+          </DialogDescription>
+        </DialogHeader>
+        <textarea
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          rows={8}
+          placeholder={"이름\t나이\n철수\t20"}
+          className="w-full resize-y rounded border border-input bg-background p-2 font-mono text-xs outline-none focus:border-ring"
+          aria-label="붙여넣을 텍스트"
+        />
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
+          <label className="flex items-center gap-2">
+            <Checkbox
+              checked={alwaysDialog}
+              onCheckedChange={(v) => {
+                const next = v === true;
+                setAlwaysDialog(next);
+                void saveSettings({ pasteAlwaysDialog: next });
+              }}
+            />
+            붙여넣기 시 항상 미리보기 대화상자 표시
+          </label>
+          <div className="flex items-center gap-2">
+            <span className="text-muted-foreground">날짜 순서</span>
+            <Select
+              value={dateOrder}
+              onValueChange={(v) => {
+                const next = v as DateOrder;
+                setDateOrder(next);
+                void saveSettings({ dateOrder: next });
+              }}
+            >
+              <SelectTrigger className="h-7 w-32 text-xs" aria-label="날짜 순서">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ymd">연-월-일</SelectItem>
+                <SelectItem value="mdy">월-일-연</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="ghost" onClick={onClose}>
+            닫기
+          </Button>
+          <Button onClick={paste} disabled={value.trim() === ""}>
+            붙여넣기
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 function ToolButton({
   label,
@@ -131,6 +236,7 @@ export default function GridToolbar() {
   const frozenCols = useWorkbookStore(
     (s) => s.workbook.sheets.find((sh) => sh.id === s.activeSheetId)?.frozenCols ?? 0,
   );
+  const [pasteDialogOpen, setPasteDialogOpen] = useState(false);
 
   const store = () => useWorkbookStore.getState();
   const rowIndex = selection?.r0 ?? 0;
@@ -146,9 +252,10 @@ export default function GridToolbar() {
 
   return (
     <div className="flex h-10 shrink-0 items-center gap-1 border-b bg-muted/40 px-2">
-      <ToolButton label="붙여넣기 옵션" disabled soon>
+      <ToolButton label="붙여넣기 옵션 (텍스트로 붙여넣기)" onClick={() => setPasteDialogOpen(true)}>
         <ClipboardText />
       </ToolButton>
+      <PasteOptionsDialog open={pasteDialogOpen} onClose={() => setPasteDialogOpen(false)} />
       <Separator orientation="vertical" className="mx-1 h-5" />
 
       <ToolButton label={`행 삽입 (${rowSpan}개)`} disabled={!selection}

@@ -10,6 +10,10 @@ export interface AppSettings {
   fontSize?: number;
   lastWorkbookId?: string;
   pyodideIndexUrl?: string;
+  /** 붙여넣기 시 항상 미리보기 다이얼로그 표시 (기본 false: 5행 이하는 즉시 반영) */
+  pasteAlwaysDialog?: boolean;
+  /** 붙여넣기 날짜 추론 순서 — 9/2/2026 같은 모호한 표기 해석 (기본 'ymd') */
+  dateOrder?: "ymd" | "mdy";
 }
 
 const DB_NAME = "pygrid";

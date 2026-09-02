@@ -18,7 +18,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useWorkbookStore } from "@/lib/grid/model";
 import { colToLetter } from "@/lib/grid/a1";
 import { cellKey, type Cell } from "@/types/workbook";
-import { formatCellDisplay } from "./format";
+import { formatCellDisplay } from "@/lib/grid/format";
 
 const EMPTY_SELECTION: GridSelection = {
   columns: CompactSelection.empty(),
@@ -201,6 +201,8 @@ export default function SheetGrid() {
         freezeColumns={sheet.frozenCols ?? 0}
         rowMarkers="number"
         getCellsForSelection={true}
+        keybindings={{ copy: false, cut: false, paste: false }} // 복사·붙여넣기는 WorkbookShell이 소유
+
         smoothScrollX
         smoothScrollY
         width="100%"

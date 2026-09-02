@@ -10,13 +10,25 @@ import {
 } from "@/components/ui/resizable";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import GridToolbar from "@/components/grid/GridToolbar";
+import PasteImportDialog, { startPasteFlow } from "@/components/grid/PasteImportDialog";
 import SheetGrid from "@/components/grid/SheetGrid";
 import SheetTabs from "@/components/grid/SheetTabs";
 import Header from "@/components/shell/Header";
 import StatusBar from "@/components/shell/StatusBar";
+import { parseClipboard } from "@/lib/grid/clipboard/parse";
+import { serializeRange } from "@/lib/grid/clipboard/serialize";
 import { useWorkbookStore } from "@/lib/grid/model";
 import { useAutosave } from "@/lib/storage/autosave";
 import { getWorkbook, loadSettings, saveSettings } from "@/lib/storage/db";
+
+/** 텍스트 입력 요소 안이면 true — 전역 단축키·클립보드 가로채기 금지 */
+const isTextInput = (target: EventTarget | null): boolean => {
+  const el = target as HTMLElement | null;
+  return (
+    !!el &&
+    (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)
+  );
+};
 
 export default function WorkbookShell() {
   const saveStatus = useAutosave();
@@ -27,15 +39,7 @@ export default function WorkbookShell() {
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey)) return;
-      const target = e.target as HTMLElement | null;
-      if (
-        target &&
-        (target.tagName === "INPUT" ||
-          target.tagName === "TEXTAREA" ||
-          target.isContentEditable)
-      ) {
-        return; // 셀 편집기·제목 입력 등에서는 네이티브 텍스트 undo
-      }
+      if (isTextInput(e.target)) return; // 셀 편집기·제목 입력 등에서는 네이티브 텍스트 undo
       const key = e.key.toLowerCase();
       if (key !== "z" && key !== "y") return;
       e.preventDefault();
@@ -45,6 +49,37 @@ export default function WorkbookShell() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  // 그리드 포커스 상태의 붙여넣기/복사 — glide 내장 copy/paste는 SheetGrid에서 꺼 둠
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      if (isTextInput(e.target) || !e.clipboardData) return;
+      const html = e.clipboardData.getData("text/html") || undefined;
+      const text = e.clipboardData.getData("text/plain") || undefined;
+      if (!html && !text) return;
+      e.preventDefault();
+      void startPasteFlow(parseClipboard({ html, text }));
+    };
+    const onCopy = (e: ClipboardEvent) => {
+      if (isTextInput(e.target) || !e.clipboardData) return;
+      const domSelection = window.getSelection();
+      if (domSelection && !domSelection.isCollapsed) return; // 페이지 텍스트 선택 중 → 기본 복사에 양보
+      const { selection, workbook, activeSheetId } = useWorkbookStore.getState();
+      if (!selection) return;
+      const sheet = workbook.sheets.find((s) => s.id === activeSheetId);
+      if (!sheet) return;
+      const { text, html } = serializeRange(sheet, selection);
+      e.clipboardData.setData("text/plain", text);
+      e.clipboardData.setData("text/html", html);
+      e.preventDefault();
+    };
+    window.addEventListener("paste", onPaste);
+    window.addEventListener("copy", onCopy);
+    return () => {
+      window.removeEventListener("paste", onPaste);
+      window.removeEventListener("copy", onCopy);
+    };
   }, []);
 
   // 마운트 시: 설정 + 마지막 워크북 복원 (없으면 스토어 초기 새 워크북 유지)
@@ -103,6 +138,7 @@ export default function WorkbookShell() {
           </div>
         </div>
         <StatusBar saveStatus={saveStatus} />
+        <PasteImportDialog />
       </div>
     </TooltipProvider>
   );
