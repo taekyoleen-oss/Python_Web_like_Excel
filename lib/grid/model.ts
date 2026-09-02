@@ -1,0 +1,360 @@
+// 워크북 Zustand 스토어 — immer(불변 편집) + zundo(undo/redo, workbook만 이력에 포함)
+
+import { create } from "zustand";
+import { immer } from "zustand/middleware/immer";
+import { temporal } from "zundo";
+import { setAutoFreeze } from "immer";
+import throttle from "lodash/throttle";
+import {
+  cellKey,
+  parseCellKey,
+  type Cell,
+  type CellRange,
+  type Sheet,
+  type Workbook,
+} from "@/types/workbook";
+
+// 10k×50 셀 워크북을 deep-freeze하면 로드가 수 초 걸린다. 모든 변경은 스토어 액션 경유.
+setAutoFreeze(false);
+
+const newId = (): string =>
+  typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : Math.random().toString(36).slice(2);
+
+export const createSheet = (name: string): Sheet => ({
+  id: newId(),
+  name,
+  rowCount: 200,
+  colCount: 26,
+  cells: {},
+});
+
+export const createWorkbook = (): Workbook => {
+  const now = new Date().toISOString();
+  return {
+    id: newId(),
+    version: 1,
+    title: "새 워크북",
+    sheets: [createSheet("Sheet1")],
+    pyBlocks: [],
+    initScript: "",
+    calcMode: "auto",
+    settings: { timeoutSec: 60, inferTypesOnPaste: true },
+    createdAt: now,
+    updatedAt: now,
+  };
+};
+
+export interface CellEdit {
+  r: number;
+  c: number;
+  cell: Cell | null;
+}
+
+export interface WorkbookState {
+  workbook: Workbook;
+  activeSheetId: string;
+  selection: CellRange | null;
+  /** spill 잠김(src) 셀이면 false를 반환하고 아무것도 바꾸지 않는다 */
+  setCellValue: (sheetId: string, r: number, c: number, cell: Cell | null) => boolean;
+  /** 일괄 편집 = 한 트랜잭션 = 한 undo 단계 */
+  setCells: (sheetId: string, edits: CellEdit[]) => void;
+  clearRange: (sheetId: string, range: CellRange) => void;
+  insertRows: (sheetId: string, index: number, count: number) => void;
+  insertCols: (sheetId: string, index: number, count: number) => void;
+  deleteRows: (sheetId: string, index: number, count: number) => void;
+  deleteCols: (sheetId: string, index: number, count: number) => void;
+  addSheet: () => void;
+  renameSheet: (sheetId: string, name: string) => void;
+  removeSheet: (sheetId: string) => void;
+  moveSheet: (sheetId: string, offset: number) => void;
+  setColWidth: (sheetId: string, col: number, width: number) => void;
+  setFrozenCols: (sheetId: string, n: number) => void;
+  setTitle: (title: string) => void;
+  setSelection: (range: CellRange | null) => void;
+  setActiveSheet: (id: string) => void;
+  newWorkbook: () => void;
+  loadWorkbook: (wb: Workbook) => void;
+}
+
+const norm = (rg: CellRange): CellRange => ({
+  r0: Math.min(rg.r0, rg.r1),
+  c0: Math.min(rg.c0, rg.c1),
+  r1: Math.max(rg.r0, rg.r1),
+  c1: Math.max(rg.c0, rg.c1),
+});
+
+/** cells 레코드 키 재배치. map이 null을 반환하면 그 셀은 삭제된다 */
+function remapCells(
+  cells: Record<string, Cell>,
+  map: (r: number, c: number) => [number, number] | null,
+): Record<string, Cell> {
+  const next: Record<string, Cell> = {};
+  for (const key of Object.keys(cells)) {
+    const { r, c } = parseCellKey(key);
+    const to = map(r, c);
+    if (to) next[cellKey(to[0], to[1])] = cells[key];
+  }
+  return next;
+}
+
+function remapWidths(
+  widths: Record<number, number> | undefined,
+  map: (c: number) => number | null,
+): Record<number, number> | undefined {
+  if (!widths) return widths;
+  const next: Record<number, number> = {};
+  for (const k of Object.keys(widths)) {
+    const c = Number(k);
+    const to = map(c);
+    if (to !== null) next[to] = widths[c];
+  }
+  return next;
+}
+
+export const createWorkbookStore = () => {
+  // partialize 메모화: workbook 참조가 같으면 같은 스냅샷 객체를 반환해
+  // equality(===)로 selection/activeSheet 변경을 이력에서 제외한다.
+  let cacheWb: Workbook | undefined;
+  let cacheSnap: { workbook: Workbook } | undefined;
+  const partialize = (s: WorkbookState): { workbook: Workbook } => {
+    if (cacheWb !== s.workbook || !cacheSnap) {
+      cacheWb = s.workbook;
+      cacheSnap = {
+        workbook: {
+          ...s.workbook,
+          // 이력에는 블록의 code/anchor/outputMode/includeIndex만 (last 실행 결과 제외)
+          pyBlocks: s.workbook.pyBlocks.map(({ last: _last, ...b }) => b),
+        },
+      };
+    }
+    return cacheSnap;
+  };
+
+  let cancelPending: () => void = () => {};
+  let resetHistory: () => void = () => {};
+
+  const store = create<WorkbookState>()(
+    temporal(
+      immer((set, get) => {
+        const wb = createWorkbook();
+
+        const mutateSheet = (sheetId: string, fn: (sheet: Sheet) => void) =>
+          set((state) => {
+            const sheet = state.workbook.sheets.find((s) => s.id === sheetId);
+            if (sheet) fn(sheet);
+          });
+
+        return {
+          workbook: wb,
+          activeSheetId: wb.sheets[0].id,
+          selection: null,
+
+          setCellValue: (sheetId, r, c, cell) => {
+            const sheet = get().workbook.sheets.find((s) => s.id === sheetId);
+            if (!sheet) return false;
+            const key = cellKey(r, c);
+            if (sheet.cells[key]?.src) return false; // spill 셀은 직접 편집 금지
+            mutateSheet(sheetId, (sh) => {
+              if (cell === null) delete sh.cells[key];
+              else sh.cells[key] = cell;
+              if (r >= sh.rowCount) sh.rowCount = r + 1;
+              if (c >= sh.colCount) sh.colCount = c + 1;
+            });
+            return true;
+          },
+
+          setCells: (sheetId, edits) =>
+            mutateSheet(sheetId, (sh) => {
+              for (const { r, c, cell } of edits) {
+                const key = cellKey(r, c);
+                if (cell === null) delete sh.cells[key];
+                else sh.cells[key] = cell;
+                if (r >= sh.rowCount) sh.rowCount = r + 1;
+                if (c >= sh.colCount) sh.colCount = c + 1;
+              }
+            }),
+
+          clearRange: (sheetId, range) =>
+            mutateSheet(sheetId, (sh) => {
+              const { r0, c0, r1, c1 } = norm(range);
+              // ponytail: 저장된 셀 전체 스캔 O(cells) — 범위 인덱스가 필요해지면 교체
+              for (const key of Object.keys(sh.cells)) {
+                const { r, c } = parseCellKey(key);
+                if (r >= r0 && r <= r1 && c >= c0 && c <= c1 && !sh.cells[key].src) {
+                  delete sh.cells[key];
+                }
+              }
+            }),
+
+          insertRows: (sheetId, index, count) =>
+            mutateSheet(sheetId, (sh) => {
+              if (count <= 0) return;
+              sh.rowCount += count;
+              sh.cells = remapCells(sh.cells, (r, c) =>
+                r >= index ? [r + count, c] : [r, c],
+              );
+            }),
+
+          deleteRows: (sheetId, index, count) =>
+            mutateSheet(sheetId, (sh) => {
+              if (count <= 0) return;
+              sh.rowCount = Math.max(1, sh.rowCount - count);
+              sh.cells = remapCells(sh.cells, (r, c) => {
+                if (r < index) return [r, c];
+                if (r < index + count) return null;
+                return [r - count, c];
+              });
+            }),
+
+          insertCols: (sheetId, index, count) =>
+            mutateSheet(sheetId, (sh) => {
+              if (count <= 0) return;
+              sh.colCount += count;
+              sh.cells = remapCells(sh.cells, (r, c) =>
+                c >= index ? [r, c + count] : [r, c],
+              );
+              sh.colWidths = remapWidths(sh.colWidths, (c) =>
+                c >= index ? c + count : c,
+              );
+            }),
+
+          deleteCols: (sheetId, index, count) =>
+            mutateSheet(sheetId, (sh) => {
+              if (count <= 0) return;
+              sh.colCount = Math.max(1, sh.colCount - count);
+              sh.cells = remapCells(sh.cells, (r, c) => {
+                if (c < index) return [r, c];
+                if (c < index + count) return null;
+                return [r, c - count];
+              });
+              sh.colWidths = remapWidths(sh.colWidths, (c) => {
+                if (c < index) return c;
+                if (c < index + count) return null;
+                return c - count;
+              });
+              if (sh.frozenCols) {
+                // setFrozenCols와 같은 불변식: 최대 colCount - 1
+                sh.frozenCols = Math.min(sh.frozenCols, sh.colCount - 1);
+              }
+            }),
+
+          addSheet: () =>
+            set((state) => {
+              const names = new Set(state.workbook.sheets.map((s) => s.name));
+              let i = state.workbook.sheets.length + 1;
+              while (names.has(`Sheet${i}`)) i++;
+              const sheet = createSheet(`Sheet${i}`);
+              state.workbook.sheets.push(sheet);
+              state.activeSheetId = sheet.id;
+            }),
+
+          renameSheet: (sheetId, name) => {
+            const trimmed = name.trim();
+            if (trimmed === "") return;
+            mutateSheet(sheetId, (sh) => {
+              sh.name = trimmed;
+            });
+          },
+
+          removeSheet: (sheetId) =>
+            set((state) => {
+              const sheets = state.workbook.sheets;
+              if (sheets.length <= 1) return;
+              const idx = sheets.findIndex((s) => s.id === sheetId);
+              if (idx < 0) return;
+              sheets.splice(idx, 1);
+              if (state.activeSheetId === sheetId) {
+                state.activeSheetId = sheets[Math.max(0, idx - 1)].id;
+                state.selection = null;
+              }
+            }),
+
+          moveSheet: (sheetId, offset) =>
+            set((state) => {
+              const sheets = state.workbook.sheets;
+              const idx = sheets.findIndex((s) => s.id === sheetId);
+              if (idx < 0) return;
+              const to = Math.max(0, Math.min(sheets.length - 1, idx + offset));
+              if (to === idx) return;
+              const [sheet] = sheets.splice(idx, 1);
+              sheets.splice(to, 0, sheet);
+            }),
+
+          setColWidth: (sheetId, col, width) =>
+            mutateSheet(sheetId, (sh) => {
+              (sh.colWidths ??= {})[col] = Math.max(30, Math.round(width));
+            }),
+
+          setFrozenCols: (sheetId, n) =>
+            mutateSheet(sheetId, (sh) => {
+              sh.frozenCols = Math.max(0, Math.min(n, sh.colCount - 1));
+            }),
+
+          setTitle: (title) => {
+            const trimmed = title.trim();
+            if (trimmed === "") return;
+            set((state) => {
+              state.workbook.title = trimmed;
+            });
+          },
+
+          setSelection: (range) =>
+            set((state) => {
+              state.selection = range;
+            }),
+
+          setActiveSheet: (id) =>
+            set((state) => {
+              if (state.workbook.sheets.some((s) => s.id === id)) {
+                state.activeSheetId = id;
+                state.selection = null;
+              }
+            }),
+
+          newWorkbook: () => {
+            const fresh = createWorkbook();
+            set((state) => {
+              state.workbook = fresh;
+              state.activeSheetId = fresh.sheets[0].id;
+              state.selection = null;
+            });
+            resetHistory();
+          },
+
+          loadWorkbook: (loaded) => {
+            set((state) => {
+              state.workbook = loaded;
+              state.activeSheetId = loaded.sheets[0]?.id ?? "";
+              state.selection = null;
+            });
+            resetHistory();
+          },
+        };
+      }),
+      {
+        limit: 100,
+        partialize,
+        equality: (a, b) => a === b,
+        handleSet: (handle) => {
+          const throttled = throttle(handle as (...args: unknown[]) => void, 300, {
+            leading: true,
+            trailing: true,
+          });
+          cancelPending = () => throttled.cancel();
+          return throttled;
+        },
+      },
+    ),
+  );
+
+  resetHistory = () => {
+    cancelPending(); // 대기 중인 trailing push가 초기화 후 이력을 오염시키지 않도록
+    store.temporal.getState().clear();
+  };
+
+  return store;
+};
+
+export const useWorkbookStore = createWorkbookStore();
