@@ -13,11 +13,17 @@ import GridToolbar from "@/components/grid/GridToolbar";
 import PasteImportDialog, { startPasteFlow } from "@/components/grid/PasteImportDialog";
 import SheetGrid from "@/components/grid/SheetGrid";
 import SheetTabs from "@/components/grid/SheetTabs";
+import { ConsoleTab } from "@/components/panels/ConsoleTab";
+import PythonPanel from "@/components/python/PythonPanel";
 import Header from "@/components/shell/Header";
+import { RuntimeStatus } from "@/components/shell/RuntimeStatus";
 import StatusBar from "@/components/shell/StatusBar";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { parseClipboard } from "@/lib/grid/clipboard/parse";
 import { serializeRange } from "@/lib/grid/clipboard/serialize";
 import { useWorkbookStore } from "@/lib/grid/model";
+import { addBlockAtSelection } from "@/lib/grid/run-block";
+import { DEFAULT_INIT_SCRIPT, getRuntimeClient } from "@/lib/runtime/client";
 import { useAutosave } from "@/lib/storage/autosave";
 import { getWorkbook, loadSettings, saveSettings } from "@/lib/storage/db";
 
@@ -34,6 +40,13 @@ export default function WorkbookShell() {
   const saveStatus = useAutosave();
   const [restored, setRestored] = useState(false);
   const [splitRatio, setSplitRatio] = useState(72);
+  // 런타임 싱글턴 — 첫 클라이언트 렌더에서 생성 (ssr:false 페이지)
+  const [runtime] = useState(() => getRuntimeClient());
+
+  // 런타임 백그라운드 부트 (멱등)
+  useEffect(() => {
+    void runtime.boot({ initScript: DEFAULT_INIT_SCRIPT });
+  }, [runtime]);
 
   // Ctrl+Z / Ctrl+Y (Ctrl+Shift+Z) — 텍스트 입력 중에는 네이티브 undo에 양보
   useEffect(() => {
@@ -41,6 +54,11 @@ export default function WorkbookShell() {
       if (!(e.ctrlKey || e.metaKey)) return;
       if (isTextInput(e.target)) return; // 셀 편집기·제목 입력 등에서는 네이티브 텍스트 undo
       const key = e.key.toLowerCase();
+      if (key === "p" && e.shiftKey) {
+        e.preventDefault();
+        addBlockAtSelection(); // ＋ Python 블록 (§2.3.1)
+        return;
+      }
       if (key !== "z" && key !== "y") return;
       e.preventDefault();
       const temporal = useWorkbookStore.temporal.getState();
@@ -108,7 +126,9 @@ export default function WorkbookShell() {
   return (
     <TooltipProvider delayDuration={300}>
       <div className="flex h-screen flex-col bg-background">
-        <Header />
+        <Header>
+          <RuntimeStatus client={runtime} />
+        </Header>
         <GridToolbar />
         <ResizablePanelGroup
           key={restored ? "restored" : "initial"} // 설정 로드 후 defaultSize 반영을 위해 재마운트
@@ -124,18 +144,20 @@ export default function WorkbookShell() {
           </ResizablePanel>
           <ResizableHandle withHandle />
           <ResizablePanel id="python" defaultSize={`${100 - splitRatio}%`} minSize="15%">
-            <div className="flex h-full flex-col border-l bg-code-bg">
-              <div className="border-b px-3 py-2 text-xs font-medium text-muted-foreground">
-                Python 패널
-              </div>
-              <div className="flex-1" />
-            </div>
+            <PythonPanel />
           </ResizablePanel>
         </ResizablePanelGroup>
         <div className="h-40 shrink-0 border-t">
-          <div className="px-3 py-2 text-xs font-medium text-muted-foreground">
-            진단·미리보기·변수·콘솔
-          </div>
+          <Tabs defaultValue="console" className="flex h-full flex-col">
+            <TabsList className="h-7 justify-start rounded-none border-b bg-muted/40 px-2">
+              <TabsTrigger value="console" className="h-6 text-xs">
+                콘솔
+              </TabsTrigger>
+            </TabsList>
+            <TabsContent value="console" className="min-h-0 flex-1">
+              <ConsoleTab client={runtime} className="h-full" />
+            </TabsContent>
+          </Tabs>
         </div>
         <StatusBar saveStatus={saveStatus} />
         <PasteImportDialog />

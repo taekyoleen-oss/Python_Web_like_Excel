@@ -32,6 +32,8 @@ import {
 import type { DateOrder } from "@/lib/grid/clipboard/infer";
 import { parseClipboard } from "@/lib/grid/clipboard/parse";
 import { useWorkbookStore, type CellEdit } from "@/lib/grid/model";
+import { addBlockAtSelection, runAllBlocks } from "@/lib/grid/run-block";
+import { getRuntimeClient } from "@/lib/runtime/client";
 import {
   Select,
   SelectContent,
@@ -294,13 +296,13 @@ export default function GridToolbar() {
       </ToolButton>
       <Separator orientation="vertical" className="mx-1 h-5" />
 
-      <ToolButton label="Python 블록 추가" disabled soon>
-        <Plus />
+      <ToolButton label="Python 블록 추가 (Ctrl+Shift+P)" onClick={addBlockAtSelection}>
+        <Plus className="text-primary" />
       </ToolButton>
-      <ToolButton label="전체 실행" disabled soon>
-        <Play />
+      <ToolButton label="전체 실행" onClick={() => void runAllBlocks()}>
+        <Play className="text-primary" />
       </ToolButton>
-      <ToolButton label="중단" disabled soon>
+      <ToolButton label="실행 중단" onClick={() => getRuntimeClient().interrupt()}>
         <Stop />
       </ToolButton>
       <Tooltip>

@@ -10,6 +10,8 @@ import {
   parseCellKey,
   type Cell,
   type CellRange,
+  type OutputMode,
+  type RunResult,
   type Sheet,
   type Workbook,
 } from "@/types/workbook";
@@ -56,6 +58,12 @@ export interface WorkbookState {
   workbook: Workbook;
   activeSheetId: string;
   selection: CellRange | null;
+  /** 실행 중 블록 표시(#BUSY! 렌더) — workbook 밖이라 undo 이력에 안 남는다 */
+  runningBlocks: Record<string, true>;
+  /** 실행 성공 400ms 플래시 범위 (렌더 전용) */
+  flash: { sheetId: string; range: CellRange } | null;
+  /** Python 패널에서 포커스할 블록 (블록 추가 직후) */
+  focusBlockId: string | null;
   /** spill 잠김(src) 셀이면 false를 반환하고 아무것도 바꾸지 않는다 */
   setCellValue: (sheetId: string, r: number, c: number, cell: Cell | null) => boolean;
   /** 일괄 편집 = 한 트랜잭션 = 한 undo 단계 */
@@ -78,6 +86,25 @@ export interface WorkbookState {
   setActiveSheet: (id: string) => void;
   newWorkbook: () => void;
   loadWorkbook: (wb: Workbook) => void;
+  /** 블록 생성. 앵커에 이미 블록·spill 셀이 있으면 null */
+  addPyBlock: (sheetId: string, anchor: { r: number; c: number }) => string | null;
+  /** 블록 + 그 spill 셀 제거 (한 트랜잭션) */
+  removePyBlock: (id: string) => void;
+  setBlockCode: (id: string, code: string) => void;
+  setBlockOutputMode: (id: string, mode: OutputMode) => void;
+  /**
+   * 실행 결과 반영 — 한 트랜잭션(= 한 undo 단계).
+   * cells를 앵커부터 src=blockId로 기록. clearPrevious면 기존 spill(src===blockId) 먼저 제거.
+   * 실패(#PYTHON!)·충돌(#SPILL!)은 앵커 1셀만 쓰고 이전 spill은 유지한다(설계서 §4: 성공 시에만 교체).
+   */
+  applyBlockResult: (
+    blockId: string,
+    cells: Cell[][],
+    opts?: { last?: RunResult; clearPrevious?: boolean },
+  ) => void;
+  setBlockRunning: (id: string, running: boolean) => void;
+  setFlash: (flash: { sheetId: string; range: CellRange } | null) => void;
+  setFocusBlock: (id: string | null) => void;
 }
 
 const norm = (rg: CellRange): CellRange => ({
@@ -152,6 +179,9 @@ export const createWorkbookStore = () => {
           workbook: wb,
           activeSheetId: wb.sheets[0].id,
           selection: null,
+          runningBlocks: {},
+          flash: null,
+          focusBlockId: null,
 
           setCellValue: (sheetId, r, c, cell) => {
             const sheet = get().workbook.sheets.find((s) => s.id === sheetId);
@@ -350,6 +380,103 @@ export const createWorkbookStore = () => {
             });
             resetHistory();
           },
+
+          addPyBlock: (sheetId, anchor) => {
+            const st = get();
+            const sheet = st.workbook.sheets.find((s) => s.id === sheetId);
+            if (!sheet) return null;
+            if (sheet.cells[cellKey(anchor.r, anchor.c)]?.src) return null;
+            if (
+              st.workbook.pyBlocks.some(
+                (b) =>
+                  b.sheetId === sheetId &&
+                  b.anchor.r === anchor.r &&
+                  b.anchor.c === anchor.c,
+              )
+            ) {
+              return null;
+            }
+            const id = newId();
+            set((state) => {
+              state.workbook.pyBlocks.push({
+                id,
+                sheetId,
+                anchor,
+                code: "",
+                outputMode: "values",
+                includeIndex: "auto",
+              });
+            });
+            return id;
+          },
+
+          removePyBlock: (id) =>
+            set((state) => {
+              const idx = state.workbook.pyBlocks.findIndex((b) => b.id === id);
+              if (idx < 0) return;
+              const block = state.workbook.pyBlocks[idx];
+              const sheet = state.workbook.sheets.find((s) => s.id === block.sheetId);
+              if (sheet) {
+                for (const key of Object.keys(sheet.cells)) {
+                  if (sheet.cells[key].src === id) delete sheet.cells[key];
+                }
+              }
+              state.workbook.pyBlocks.splice(idx, 1);
+              delete state.runningBlocks[id];
+              if (state.focusBlockId === id) state.focusBlockId = null;
+            }),
+
+          setBlockCode: (id, code) =>
+            set((state) => {
+              const block = state.workbook.pyBlocks.find((b) => b.id === id);
+              if (block && block.code !== code) block.code = code;
+            }),
+
+          setBlockOutputMode: (id, mode) =>
+            set((state) => {
+              const block = state.workbook.pyBlocks.find((b) => b.id === id);
+              // 객체→값 전환의 spill 충돌은 다음 실행에서 검사한다 (§2.3.6, M5)
+              if (block) block.outputMode = mode;
+            }),
+
+          applyBlockResult: (blockId, cells, opts) =>
+            set((state) => {
+              const block = state.workbook.pyBlocks.find((b) => b.id === blockId);
+              if (!block) return;
+              const sheet = state.workbook.sheets.find((s) => s.id === block.sheetId);
+              if (!sheet) return;
+              if (opts?.clearPrevious) {
+                for (const key of Object.keys(sheet.cells)) {
+                  if (sheet.cells[key].src === blockId) delete sheet.cells[key];
+                }
+              }
+              cells.forEach((row, i) =>
+                row.forEach((cell, j) => {
+                  const r = block.anchor.r + i;
+                  const c = block.anchor.c + j;
+                  sheet.cells[cellKey(r, c)] = { ...cell, src: blockId };
+                  if (r >= sheet.rowCount) sheet.rowCount = r + 1;
+                  if (c >= sheet.colCount) sheet.colCount = c + 1;
+                }),
+              );
+              if (opts?.last) block.last = opts.last;
+            }),
+
+          setBlockRunning: (id, running) =>
+            set((state) => {
+              if (running) state.runningBlocks[id] = true;
+              else delete state.runningBlocks[id];
+            }),
+
+          setFlash: (flash) =>
+            set((state) => {
+              state.flash = flash;
+            }),
+
+          setFocusBlock: (id) =>
+            set((state) => {
+              state.focusBlockId = id;
+            }),
         };
       }),
       {
