@@ -88,6 +88,36 @@ export default function SheetGrid() {
     setGridSelection(EMPTY_SELECTION);
   }, [sheet.id]);
 
+  // 스토어 → glide 선택 동기화 (앵커로 이동·Ctrl+1 기본 선택 등 외부 변경 반영)
+  const storeSelection = useWorkbookStore((s) => s.selection);
+  useEffect(() => {
+    if (!storeSelection) return;
+    const cur = gridSelection.current?.range;
+    const same =
+      cur &&
+      cur.x === storeSelection.c0 &&
+      cur.y === storeSelection.r0 &&
+      cur.width === storeSelection.c1 - storeSelection.c0 + 1 &&
+      cur.height === storeSelection.r1 - storeSelection.r0 + 1;
+    if (!same) {
+      setGridSelection({
+        columns: CompactSelection.empty(),
+        rows: CompactSelection.empty(),
+        current: {
+          cell: [storeSelection.c0, storeSelection.r0],
+          range: {
+            x: storeSelection.c0,
+            y: storeSelection.r0,
+            width: storeSelection.c1 - storeSelection.c0 + 1,
+            height: storeSelection.r1 - storeSelection.r0 + 1,
+          },
+          rangeStack: [],
+        },
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storeSelection]); // gridSelection 의도적 제외 — glide발 변경은 same으로 걸러져 루프 없음
+
   // canvas는 CSS 변수를 못 쓰므로 body에서 실제 폰트 패밀리를 읽는다
   const [fontFamily, setFontFamily] = useState("Pretendard, sans-serif");
   useEffect(() => {

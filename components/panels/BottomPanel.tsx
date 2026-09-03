@@ -28,7 +28,10 @@ export default function BottomPanel({ client }: { client: RuntimeClient }) {
       }
       className="flex h-full flex-col gap-0"
     >
-      <TabsList className="h-7 shrink-0 justify-start rounded-none border-b bg-muted/40 px-2">
+      <TabsList
+        id="bottom-panel-tabs"
+        className="h-7 shrink-0 justify-start rounded-none border-b bg-muted/40 px-2"
+      >
         <TabsTrigger value="diagnostics" className="h-6 gap-1 text-xs">
           진단
           {errorCount > 0 && (

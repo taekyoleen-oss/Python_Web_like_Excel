@@ -30,7 +30,7 @@ export default function StatusBar({ saveStatus }: { saveStatus: SaveStatus }) {
       </span>
       <button
         onClick={() => setCalcModeEverywhere(calcMode === "auto" ? "manual" : "auto")}
-        className={calcMode === "manual" ? "font-medium text-warning" : "hover:text-foreground"}
+        className={calcMode === "manual" ? "font-medium text-warning-text" : "hover:text-foreground"}
         title="클릭하여 자동/수동 전환"
       >
         계산 {calcMode === "auto" ? "자동" : "수동"}

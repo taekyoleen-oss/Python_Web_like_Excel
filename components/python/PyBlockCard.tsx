@@ -2,10 +2,16 @@
 
 // PY 블록 카드 — 헤더(앵커·모드·상태·실행·삭제) + CodeMirror 편집기
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Play, TrashSimple } from "@phosphor-icons/react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Select,
   SelectContent,
@@ -23,7 +29,7 @@ import type { OutputMode, PyBlock } from "@/types/workbook";
 
 function statusBadge(block: PyBlock, running: boolean) {
   if (running) {
-    return <Badge className="bg-warning/15 text-warning">실행 중</Badge>;
+    return <Badge className="bg-warning/15 text-warning-text">실행 중</Badge>;
   }
   switch (block.last?.status) {
     case "ok":
@@ -46,6 +52,16 @@ export default function PyBlockCard({ block }: { block: PyBlock }) {
   );
   const codeRef = useRef(block.code);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  // §4.7 <640: 인라인 편집 대신 전체 화면 편집기
+  const [narrow, setNarrow] = useState(false);
+  const [editorOpen, setEditorOpen] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 639px)");
+    const update = () => setNarrow(mq.matches);
+    update();
+    mq.addEventListener("change", update);
+    return () => mq.removeEventListener("change", update);
+  }, []);
 
   useEffect(() => () => clearTimeout(debounceRef.current), []);
 
@@ -133,14 +149,14 @@ export default function PyBlockCard({ block }: { block: PyBlock }) {
         )}
         <div className="ml-auto flex items-center gap-0.5">
           <Button
-            variant="ghost"
+            variant="default"
             size="icon-sm"
             onClick={run}
             disabled={running}
             aria-label="실행"
             title="실행 (Ctrl+Enter)"
           >
-            <Play className="text-primary" weight="fill" />
+            <Play weight="fill" />
           </Button>
           <Button
             variant="ghost"
@@ -153,14 +169,45 @@ export default function PyBlockCard({ block }: { block: PyBlock }) {
           </Button>
         </div>
       </div>
-      <CodeEditor
-        blockId={block.id}
-        sheetId={block.sheetId}
-        value={block.code}
-        onChange={onChange}
-        onRun={run}
-        placeholder={'df = xl("A1:C10", headers=True)\ndf.describe()'}
-      />
+      {narrow ? (
+        <>
+          <button
+            onClick={() => setEditorOpen(true)}
+            className="w-full truncate bg-code-bg px-2 py-2 text-left font-mono text-xs text-muted-foreground"
+          >
+            {block.code.split("\n")[0] || "코드 편집 (전체 화면)…"}
+          </button>
+          <Dialog open={editorOpen} onOpenChange={setEditorOpen}>
+            <DialogContent className="h-[85vh] max-w-full p-3">
+              <DialogHeader>
+                <DialogTitle className="text-sm">{anchorLabel} 코드 편집</DialogTitle>
+              </DialogHeader>
+              <div className="min-h-0 flex-1 overflow-auto rounded border">
+                <CodeEditor
+                  blockId={block.id}
+                  sheetId={block.sheetId}
+                  value={block.code}
+                  onChange={onChange}
+                  onRun={run}
+                  className="max-h-full"
+                />
+              </div>
+              <Button onClick={run} disabled={running} className="shrink-0">
+                실행 (Ctrl+Enter)
+              </Button>
+            </DialogContent>
+          </Dialog>
+        </>
+      ) : (
+        <CodeEditor
+          blockId={block.id}
+          sheetId={block.sheetId}
+          value={block.code}
+          onChange={onChange}
+          onRun={run}
+          placeholder={'df = xl("A1:C10", headers=True)\ndf.describe()'}
+        />
+      )}
       {block.last?.status === "error" && block.last.summaryKo && (
         <div className="border-t px-2 py-1 text-xs text-destructive">
           {block.last.summaryKo}

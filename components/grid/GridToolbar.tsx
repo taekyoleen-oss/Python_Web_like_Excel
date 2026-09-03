@@ -308,9 +308,21 @@ export default function GridToolbar() {
       <ToolButton label="Python 블록 추가 (Ctrl+Shift+P)" onClick={addBlockAtSelection}>
         <Plus className="text-primary" />
       </ToolButton>
-      <ToolButton label="전체 실행" onClick={() => void runAllBlocks()}>
-        <Play className="text-primary" />
-      </ToolButton>
+      {/* 실행 버튼은 --primary 채움 (§4.6 Button) */}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="default"
+            size="icon"
+            className="size-8"
+            onClick={() => void runAllBlocks()}
+            aria-label="전체 실행"
+          >
+            <Play weight="fill" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>전체 실행 — 계산 순서대로 모든 블록</TooltipContent>
+      </Tooltip>
       <ToolButton label="실행 중단" onClick={() => getRuntimeClient().interrupt()}>
         <Stop />
       </ToolButton>

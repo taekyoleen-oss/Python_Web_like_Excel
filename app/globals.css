@@ -16,6 +16,7 @@
   --color-border: var(--border);
   --color-destructive: var(--destructive);
   --color-warning: var(--warning);
+  --color-warning-text: var(--warning-text);
   --color-code-bg: var(--code-bg);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
@@ -69,6 +70,8 @@
   --accent-foreground: #23272e;
   --destructive: #c2504a;
   --warning: #d9a441;
+  /* 흰 배경 텍스트용 저휘도 warning 변형 — 대비 4.5:1 확보 (§1.6 접근성) */
+  --warning-text: #8a6414;
   --code-bg: #f7f8fa;
   --border: #e2e5e9;
   --input: #e2e5e9;

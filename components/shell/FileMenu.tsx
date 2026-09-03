@@ -19,13 +19,12 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useWorkbookStore } from "@/lib/grid/model";
-import { sheetToCsv } from "@/lib/io/csv";
 import {
   downloadBlob,
   downloadWorkbookJson,
   parseWorkbookJson,
 } from "@/lib/io/workbook-json";
-import { sheetsFromFileData, sheetsToXlsxBlob } from "@/lib/io/xlsx";
+// SheetJS(~140kB gz)는 첫 페인트를 막지 않도록 사용 시점에 동적 로드한다
 import { listWorkbooks, getWorkbook } from "@/lib/storage/db";
 import { createWorkbook } from "@/lib/grid/model";
 import type { Workbook } from "@/types/workbook";
@@ -52,6 +51,7 @@ export async function openWorkbookFile(file: File): Promise<void> {
       wb.sheets = [sheet];
       useWorkbookStore.getState().loadWorkbook(wb);
     } else if (name.endsWith(".xlsx") || name.endsWith(".xls")) {
+      const { sheetsFromFileData } = await import("@/lib/io/xlsx");
       const sheets = sheetsFromFileData(await file.arrayBuffer());
       if (sheets.length === 0) throw new Error("시트가 없습니다");
       const wb = createWorkbook();
@@ -79,12 +79,14 @@ export default function FileMenu() {
     }
   };
 
-  const exportXlsx = () => {
+  const exportXlsx = async () => {
+    const { sheetsToXlsxBlob } = await import("@/lib/io/xlsx");
     const wb = useWorkbookStore.getState().workbook;
     downloadBlob(sheetsToXlsxBlob(wb.sheets), `${wb.title || "워크북"}.xlsx`);
   };
 
-  const exportCsv = () => {
+  const exportCsv = async () => {
+    const { sheetToCsv } = await import("@/lib/io/csv");
     const st = useWorkbookStore.getState();
     const sheet = st.workbook.sheets.find((s) => s.id === st.activeSheetId);
     if (!sheet) return;
@@ -135,8 +137,12 @@ export default function FileMenu() {
           </DropdownMenuItem>
           <DropdownMenuItem onClick={save}>저장 (.pygrid.json)</DropdownMenuItem>
           <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={exportXlsx}>XLSX로 내보내기 (전 시트)</DropdownMenuItem>
-          <DropdownMenuItem onClick={exportCsv}>CSV로 내보내기 (활성 시트)</DropdownMenuItem>
+          <DropdownMenuItem onClick={() => void exportXlsx()}>
+            XLSX로 내보내기 (전 시트)
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => void exportCsv()}>
+            CSV로 내보내기 (활성 시트)
+          </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem onClick={() => loadWorkbookData(SAMPLE_LIFE_TABLE)}>
             샘플: 생명표

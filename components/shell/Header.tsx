@@ -6,6 +6,7 @@ import { useState, type ReactNode } from "react";
 import FileMenu from "@/components/shell/FileMenu";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useWorkbookStore } from "@/lib/grid/model";
 
 export default function Header({ children }: { children?: ReactNode }) {
@@ -48,6 +49,27 @@ export default function Header({ children }: { children?: ReactNode }) {
         </button>
       )}
       <FileMenu />
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            aria-label="키보드 단축키 안내"
+            className="flex size-6 items-center justify-center rounded-full border text-xs text-muted-foreground hover:bg-muted"
+          >
+            ?
+          </button>
+        </TooltipTrigger>
+        <TooltipContent className="max-w-64">
+          <p className="mb-1 font-medium">키보드 단축키</p>
+          <ul className="space-y-0.5 text-xs">
+            <li>Ctrl+Shift+P — Python 블록 추가</li>
+            <li>Ctrl+Enter — 블록 실행 (편집기)</li>
+            <li>Ctrl+Z / Ctrl+Y — 실행 취소 / 다시 실행</li>
+            <li>Ctrl(또는 Alt)+1 — 그리드로 포커스</li>
+            <li>Ctrl(또는 Alt)+2 — Python 편집기로 포커스</li>
+            <li>Ctrl(또는 Alt)+3 — 하단 패널로 포커스</li>
+          </ul>
+        </TooltipContent>
+      </Tooltip>
       <div className="ml-auto flex items-center gap-2">
         {children ?? (
           <div id="runtime-status-slot" className="text-xs text-muted-foreground" />

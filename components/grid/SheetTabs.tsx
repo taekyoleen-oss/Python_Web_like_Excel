@@ -53,7 +53,7 @@ export default function SheetTabs() {
                 className={cn(
                   "h-7 shrink-0 border-b-2 px-3 text-xs transition-colors",
                   sheet.id === activeSheetId
-                    ? "border-primary bg-background font-medium text-primary"
+                    ? "border-primary bg-background font-medium text-foreground" // 대비 4.5:1 — 인디케이터만 primary
                     : "border-transparent text-muted-foreground hover:text-foreground",
                 )}
               >

@@ -2,7 +2,8 @@
 
 // 전체 레이아웃 — 설계서 §4.3: 헤더 / 툴바 / [그리드+시트 탭 | Python 패널] / 하단 패널 / 상태 바
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { CaretLeft, CaretRight } from "@phosphor-icons/react";
 import {
   ResizableHandle,
   ResizablePanel,
@@ -40,6 +41,24 @@ const isTextInput = (target: EventTarget | null): boolean => {
   );
 };
 
+/** §4.7 반응형 구간 */
+type Tier = "sm" | "md" | "lg" | "xl";
+function useTier(): Tier {
+  const [tier, setTier] = useState<Tier>("xl");
+  useEffect(() => {
+    const compute = () => {
+      const w = window.innerWidth;
+      setTier(w < 640 ? "sm" : w < 1024 ? "md" : w < 1280 ? "lg" : "xl");
+    };
+    compute();
+    window.addEventListener("resize", compute);
+    return () => window.removeEventListener("resize", compute);
+  }, []);
+  return tier;
+}
+
+type MobileView = "grid" | "python" | "bottom";
+
 export default function WorkbookShell() {
   const saveStatus = useAutosave();
   const [restored, setRestored] = useState(false);
@@ -47,15 +66,54 @@ export default function WorkbookShell() {
   const [bottomHeight, setBottomHeight] = useState(24);
   // 런타임 싱글턴 — 첫 클라이언트 렌더에서 생성 (ssr:false 페이지)
   const [runtime] = useState(() => getRuntimeClient());
+  // §4.7 반응형: lg=Python 패널 접이식, md/sm=탭 전환
+  const tier = useTier();
+  const tierRef = useRef(tier);
+  tierRef.current = tier;
+  const [pyCollapsed, setPyCollapsed] = useState(false);
+  const [mobileView, setMobileView] = useState<MobileView>("grid");
 
-  // 런타임 백그라운드 부트 (멱등)
+  // 런타임 백그라운드 부트 (멱등) — 첫 페인트와 CDN 다운로드가 경쟁하지 않게 유휴 시점으로 미룬다
   useEffect(() => {
-    void runtime.boot({ initScript: DEFAULT_INIT_SCRIPT });
+    const start = () => void runtime.boot({ initScript: DEFAULT_INIT_SCRIPT });
+    if ("requestIdleCallback" in window) requestIdleCallback(start, { timeout: 3000 });
+    else setTimeout(start, 1500);
   }, [runtime]);
 
-  // Ctrl+Z / Ctrl+Y (Ctrl+Shift+Z) — 텍스트 입력 중에는 네이티브 undo에 양보
+  // Ctrl+Z/Y·Ctrl+Shift+P + 패널 포커스 이동 Ctrl(또는 Alt)+1/2/3 (§1.6 접근성)
   useEffect(() => {
+    const focusGrid = () => {
+      const st = useWorkbookStore.getState();
+      if (!st.selection) st.setSelection({ r0: 0, c0: 0, r1: 0, c1: 0 }); // 키보드 시작점
+      if (tierRef.current === "md" || tierRef.current === "sm") setMobileView("grid");
+      requestAnimationFrame(() =>
+        document.querySelector<HTMLElement>('[data-testid="data-grid-canvas"]')?.focus(),
+      );
+    };
+    const focusPython = () => {
+      if (tierRef.current === "md" || tierRef.current === "sm") setMobileView("python");
+      setPyCollapsed(false);
+      const st = useWorkbookStore.getState();
+      const target = st.lastEditorBlockId ?? st.workbook.pyBlocks[0]?.id;
+      if (target) requestAnimationFrame(() => useWorkbookStore.getState().setFocusBlock(target));
+    };
+    const focusBottom = () => {
+      if (tierRef.current === "md" || tierRef.current === "sm") setMobileView("bottom");
+      requestAnimationFrame(() =>
+        document
+          .querySelector<HTMLElement>('#bottom-panel-tabs [data-state="active"]')
+          ?.focus(),
+      );
+    };
     const onKeyDown = (e: KeyboardEvent) => {
+      // 패널 포커스 이동은 텍스트 입력 중에도 동작 (Ctrl+숫자는 브라우저 탭 예약이라 Alt+숫자 병용)
+      if ((e.ctrlKey || e.metaKey || e.altKey) && ["1", "2", "3"].includes(e.key)) {
+        e.preventDefault();
+        if (e.key === "1") focusGrid();
+        else if (e.key === "2") focusPython();
+        else focusBottom();
+        return;
+      }
       if (!(e.ctrlKey || e.metaKey)) return;
       if (isTextInput(e.target)) return; // 셀 편집기·제목 입력 등에서는 네이티브 텍스트 undo
       const key = e.key.toLowerCase();
@@ -160,19 +218,35 @@ export default function WorkbookShell() {
           <RuntimeStatus client={runtime} />
         </Header>
         <GridToolbar />
-        <ResizablePanelGroup
-          key={restored ? "restored-v" : "initial-v"} // 설정 로드 후 defaultSize 반영을 위해 재마운트
-          orientation="vertical"
-          className="min-h-0 flex-1"
-          onLayoutChanged={onVerticalLayoutChanged}
-        >
-          <ResizablePanel id="main" defaultSize={`${100 - bottomHeight}%`} minSize="30%">
-            <ResizablePanelGroup
-              orientation="horizontal"
-              className="min-h-0"
-              onLayoutChanged={onLayoutChanged}
-            >
-              <ResizablePanel id="grid" defaultSize={`${splitRatio}%`} minSize="40%">
+        <main className="flex min-h-0 flex-1 flex-col">
+        {tier === "md" || tier === "sm" ? (
+          /* §4.7 640–1023(및 <640 열람 우선): 그리드 ↔ Python ↔ 결과 탭 전환 */
+          <div className="flex min-h-0 flex-1 flex-col">
+            <div role="tablist" aria-label="화면 전환" className="flex shrink-0 border-b bg-muted/40">
+              {(
+                [
+                  ["grid", "그리드"],
+                  ["python", "Python"],
+                  ["bottom", "결과"],
+                ] as const
+              ).map(([id, label]) => (
+                <button
+                  key={id}
+                  role="tab"
+                  aria-selected={mobileView === id}
+                  onClick={() => setMobileView(id)}
+                  className={`h-8 border-b-2 px-4 text-xs ${
+                    mobileView === id
+                      ? "border-primary font-medium text-foreground" // 대비 4.5:1 — 인디케이터만 primary
+                      : "border-transparent text-muted-foreground"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div className="min-h-0 flex-1">
+              {mobileView === "grid" && (
                 <div
                   {...dropHandlers}
                   className={`flex h-full min-w-0 flex-col ${dropActive ? "ring-2 ring-inset ring-primary" : ""}`}
@@ -180,20 +254,73 @@ export default function WorkbookShell() {
                   <SheetGrid />
                   <SheetTabs />
                 </div>
-              </ResizablePanel>
-              <ResizableHandle withHandle />
-              <ResizablePanel id="python" defaultSize={`${100 - splitRatio}%`} minSize="15%">
-                <PythonPanel />
-              </ResizablePanel>
-            </ResizablePanelGroup>
-          </ResizablePanel>
-          <ResizableHandle />
-          <ResizablePanel id="bottom" defaultSize={`${bottomHeight}%`} minSize="10%">
-            <div className="h-full border-t">
-              <BottomPanel client={runtime} />
+              )}
+              {mobileView === "python" && <PythonPanel />}
+              {mobileView === "bottom" && (
+                <div className="h-full">
+                  <BottomPanel client={runtime} />
+                </div>
+              )}
             </div>
-          </ResizablePanel>
-        </ResizablePanelGroup>
+          </div>
+        ) : (
+          <ResizablePanelGroup
+            key={restored ? "restored-v" : "initial-v"} // 설정 로드 후 defaultSize 반영을 위해 재마운트
+            orientation="vertical"
+            className="min-h-0 flex-1"
+            onLayoutChanged={onVerticalLayoutChanged}
+          >
+            <ResizablePanel id="main" defaultSize={`${100 - bottomHeight}%`} minSize="30%">
+              <div className="relative h-full">
+                {/* §4.7 1024–1279: Python 패널 접이식 토글 */}
+                {tier === "lg" && (
+                  <button
+                    onClick={() => setPyCollapsed((v) => !v)}
+                    aria-label={pyCollapsed ? "Python 패널 열기" : "Python 패널 접기"}
+                    className="absolute right-0 top-8 z-10 rounded-l border border-r-0 bg-muted px-0.5 py-2 text-muted-foreground hover:text-foreground"
+                  >
+                    {pyCollapsed ? <CaretLeft className="size-3" /> : <CaretRight className="size-3" />}
+                  </button>
+                )}
+                <ResizablePanelGroup
+                  key={tier === "lg" && pyCollapsed ? "collapsed" : "split"}
+                  orientation="horizontal"
+                  className="min-h-0"
+                  onLayoutChanged={onLayoutChanged}
+                >
+                  <ResizablePanel id="grid" defaultSize={`${pyCollapsed && tier === "lg" ? 100 : splitRatio}%`} minSize="40%">
+                    <div
+                      {...dropHandlers}
+                      className={`flex h-full min-w-0 flex-col ${dropActive ? "ring-2 ring-inset ring-primary" : ""}`}
+                    >
+                      <SheetGrid />
+                      <SheetTabs />
+                    </div>
+                  </ResizablePanel>
+                  {!(tier === "lg" && pyCollapsed) && (
+                    <>
+                      <ResizableHandle withHandle />
+                      <ResizablePanel
+                        id="python"
+                        defaultSize={`${100 - splitRatio}%`}
+                        minSize="15%"
+                      >
+                        <PythonPanel />
+                      </ResizablePanel>
+                    </>
+                  )}
+                </ResizablePanelGroup>
+              </div>
+            </ResizablePanel>
+            <ResizableHandle />
+            <ResizablePanel id="bottom" defaultSize={`${bottomHeight}%`} minSize="10%">
+              <div className="h-full border-t">
+                <BottomPanel client={runtime} />
+              </div>
+            </ResizablePanel>
+          </ResizablePanelGroup>
+        )}
+        </main>
         <StatusBar saveStatus={saveStatus} />
         <PasteImportDialog />
       </div>

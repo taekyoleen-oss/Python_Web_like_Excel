@@ -35,7 +35,7 @@ export function RuntimeStatus({ client }: { client: RuntimeClient }) {
   if (status === "idle" || status === "loading") {
     return (
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
-        <Progress value={prog.pct} className="w-24" />
+        <Progress value={prog.pct} className="w-24" aria-label="런타임 로드 진행률" />
         <span>
           런타임 로드 중 {prog.pct}%{prog.label ? ` · ${prog.label}` : ""}
         </span>
