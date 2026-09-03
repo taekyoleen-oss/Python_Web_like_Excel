@@ -89,6 +89,7 @@ def build_life_table():
         "outputMode": "object",
         "includeIndex": "auto",
         "code": (
+            "import matplotlib.pyplot as plt\n"
             'df = xl("A1:B102", headers=True)\n'
             "lx = [100000.0]\n"
             'for q in df["qx"][:-1]:\n'
@@ -175,6 +176,7 @@ SNIPPET_LIST = [
         "name": "히스토그램",
         "description": "숫자 열 분포 그래프 (객체 모드로 실행)",
         "code": (
+            "import matplotlib.pyplot as plt\n"
             "df = {{range}}\n"
             "fig, ax = plt.subplots(figsize=(7, 4))\n"
             "ax.hist(df.iloc[:, 0], bins=20, color=\"#4A90C2\")\n"

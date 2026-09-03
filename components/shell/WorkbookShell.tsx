@@ -13,12 +13,11 @@ import GridToolbar from "@/components/grid/GridToolbar";
 import PasteImportDialog, { startPasteFlow } from "@/components/grid/PasteImportDialog";
 import SheetGrid from "@/components/grid/SheetGrid";
 import SheetTabs from "@/components/grid/SheetTabs";
-import { ConsoleTab } from "@/components/panels/ConsoleTab";
+import BottomPanel from "@/components/panels/BottomPanel";
 import PythonPanel from "@/components/python/PythonPanel";
 import Header from "@/components/shell/Header";
 import { RuntimeStatus } from "@/components/shell/RuntimeStatus";
 import StatusBar from "@/components/shell/StatusBar";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { parseClipboard } from "@/lib/grid/clipboard/parse";
 import { serializeRange } from "@/lib/grid/clipboard/serialize";
 import { useWorkbookStore } from "@/lib/grid/model";
@@ -40,6 +39,7 @@ export default function WorkbookShell() {
   const saveStatus = useAutosave();
   const [restored, setRestored] = useState(false);
   const [splitRatio, setSplitRatio] = useState(72);
+  const [bottomHeight, setBottomHeight] = useState(24);
   // 런타임 싱글턴 — 첫 클라이언트 렌더에서 생성 (ssr:false 페이지)
   const [runtime] = useState(() => getRuntimeClient());
 
@@ -106,6 +106,7 @@ export default function WorkbookShell() {
       try {
         const settings = await loadSettings();
         if (settings?.splitRatio) setSplitRatio(settings.splitRatio);
+        if (settings?.bottomPanelHeight) setBottomHeight(settings.bottomPanelHeight);
         if (settings?.lastWorkbookId) {
           const wb = await getWorkbook(settings.lastWorkbookId);
           if (wb) useWorkbookStore.getState().loadWorkbook(wb);
@@ -118,9 +119,12 @@ export default function WorkbookShell() {
     })();
   }, []);
 
-  // 드래그 종료 후 한 번 호출됨 — 분할 비율을 설정 스토어에 보존
+  // 드래그 종료 후 한 번 호출됨 — 분할 비율·하단 패널 높이를 설정 스토어에 보존 (§3.2)
   const onLayoutChanged = (layout: Record<string, number>) => {
     if (layout.grid) void saveSettings({ splitRatio: layout.grid });
+  };
+  const onVerticalLayoutChanged = (layout: Record<string, number>) => {
+    if (layout.bottom) void saveSettings({ bottomPanelHeight: layout.bottom });
   };
 
   return (
@@ -131,34 +135,36 @@ export default function WorkbookShell() {
         </Header>
         <GridToolbar />
         <ResizablePanelGroup
-          key={restored ? "restored" : "initial"} // 설정 로드 후 defaultSize 반영을 위해 재마운트
-          orientation="horizontal"
+          key={restored ? "restored-v" : "initial-v"} // 설정 로드 후 defaultSize 반영을 위해 재마운트
+          orientation="vertical"
           className="min-h-0 flex-1"
-          onLayoutChanged={onLayoutChanged}
+          onLayoutChanged={onVerticalLayoutChanged}
         >
-          <ResizablePanel id="grid" defaultSize={`${splitRatio}%`} minSize="40%">
-            <div className="flex h-full min-w-0 flex-col">
-              <SheetGrid />
-              <SheetTabs />
+          <ResizablePanel id="main" defaultSize={`${100 - bottomHeight}%`} minSize="30%">
+            <ResizablePanelGroup
+              orientation="horizontal"
+              className="min-h-0"
+              onLayoutChanged={onLayoutChanged}
+            >
+              <ResizablePanel id="grid" defaultSize={`${splitRatio}%`} minSize="40%">
+                <div className="flex h-full min-w-0 flex-col">
+                  <SheetGrid />
+                  <SheetTabs />
+                </div>
+              </ResizablePanel>
+              <ResizableHandle withHandle />
+              <ResizablePanel id="python" defaultSize={`${100 - splitRatio}%`} minSize="15%">
+                <PythonPanel />
+              </ResizablePanel>
+            </ResizablePanelGroup>
+          </ResizablePanel>
+          <ResizableHandle />
+          <ResizablePanel id="bottom" defaultSize={`${bottomHeight}%`} minSize="10%">
+            <div className="h-full border-t">
+              <BottomPanel client={runtime} />
             </div>
           </ResizablePanel>
-          <ResizableHandle withHandle />
-          <ResizablePanel id="python" defaultSize={`${100 - splitRatio}%`} minSize="15%">
-            <PythonPanel />
-          </ResizablePanel>
         </ResizablePanelGroup>
-        <div className="h-40 shrink-0 border-t">
-          <Tabs defaultValue="console" className="flex h-full flex-col">
-            <TabsList className="h-7 justify-start rounded-none border-b bg-muted/40 px-2">
-              <TabsTrigger value="console" className="h-6 text-xs">
-                콘솔
-              </TabsTrigger>
-            </TabsList>
-            <TabsContent value="console" className="min-h-0 flex-1">
-              <ConsoleTab client={runtime} className="h-full" />
-            </TabsContent>
-          </Tabs>
-        </div>
         <StatusBar saveStatus={saveStatus} />
         <PasteImportDialog />
       </div>

@@ -67,6 +67,16 @@ export interface WorkbookState {
   focusBlockId: string | null;
   /** 재실행 필요 블록(수동 모드 배지) — workbook 밖 transient */
   dirtyBlocks: Record<string, true>;
+  /** 편집기 xl() 커서 → 그리드 점선 하이라이트 (§4.8) */
+  hoverRange: { sheetId: string; range: CellRange } | null;
+  /** 그리드 spill hover → 블록 카드 강조 (§4.8 역방향) */
+  hoverBlockId: string | null;
+  /** 출력 미리보기 탭 대상 블록 */
+  selectedBlockId: string | null;
+  /** 하단 패널 활성 탭 */
+  bottomTab: "diagnostics" | "preview" | "variables" | "console";
+  /** 마지막으로 포커스된 블록 편집기 (참조 삽입·스니펫 대상) */
+  lastEditorBlockId: string | null;
   /** spill 잠김(src) 셀이면 false를 반환하고 아무것도 바꾸지 않는다 */
   setCellValue: (sheetId: string, r: number, c: number, cell: Cell | null) => boolean;
   /** 일괄 편집 = 한 트랜잭션 = 한 undo 단계 */
@@ -111,6 +121,12 @@ export interface WorkbookState {
   markDirty: (ids: string[]) => void;
   clearDirty: (id: string) => void;
   setCalcMode: (mode: CalcMode) => void;
+  setInitScript: (script: string) => void;
+  setHoverRange: (hover: { sheetId: string; range: CellRange } | null) => void;
+  setHoverBlock: (id: string | null) => void;
+  setSelectedBlock: (id: string | null) => void;
+  setBottomTab: (tab: WorkbookState["bottomTab"]) => void;
+  setLastEditorBlock: (id: string | null) => void;
 }
 
 const norm = (rg: CellRange): CellRange => ({
@@ -189,6 +205,11 @@ export const createWorkbookStore = () => {
           flash: null,
           focusBlockId: null,
           dirtyBlocks: {},
+          hoverRange: null,
+          hoverBlockId: null,
+          selectedBlockId: null,
+          bottomTab: "diagnostics" as const,
+          lastEditorBlockId: null,
 
           setCellValue: (sheetId, r, c, cell) => {
             const sheet = get().workbook.sheets.find((s) => s.id === sheetId);
@@ -432,6 +453,9 @@ export const createWorkbookStore = () => {
               delete state.runningBlocks[id];
               delete state.dirtyBlocks[id];
               if (state.focusBlockId === id) state.focusBlockId = null;
+              if (state.selectedBlockId === id) state.selectedBlockId = null;
+              if (state.lastEditorBlockId === id) state.lastEditorBlockId = null;
+              if (state.hoverBlockId === id) state.hoverBlockId = null;
             }),
 
           setBlockCode: (id, code) =>
@@ -499,6 +523,36 @@ export const createWorkbookStore = () => {
           setCalcMode: (mode) =>
             set((state) => {
               state.workbook.calcMode = mode;
+            }),
+
+          setInitScript: (script) =>
+            set((state) => {
+              state.workbook.initScript = script;
+            }),
+
+          setHoverRange: (hover) =>
+            set((state) => {
+              state.hoverRange = hover;
+            }),
+
+          setHoverBlock: (id) =>
+            set((state) => {
+              state.hoverBlockId = id;
+            }),
+
+          setSelectedBlock: (id) =>
+            set((state) => {
+              state.selectedBlockId = id;
+            }),
+
+          setBottomTab: (tab) =>
+            set((state) => {
+              state.bottomTab = tab;
+            }),
+
+          setLastEditorBlock: (id) =>
+            set((state) => {
+              state.lastEditorBlockId = id;
             }),
         };
       }),

@@ -48,6 +48,10 @@ const resolveSheetName = (name: string): string | undefined =>
 /** 합성 errorType(엔진 발신)은 message가 이미 한국어 — errors-ko 매핑을 거치지 않는다 */
 const ENGINE_ERRORS = new Set(["PyGridCycleError", "PyGridAnalyzeError", "PyGridRefError", "WorkerError"]);
 
+// 객체 모드 blob 저장(await)이 직렬 큐 밖에서 끝나므로, 늦게 도착한 이전 실행의
+// 반영이 다음 실행 결과를 덮지 않도록 블록별 실행 시퀀스로 가드한다.
+const runSeq = new Map<string, number>();
+
 export const calcHost: CalcHost = {
   getCell(sheetId, r, c) {
     const cell = getState()
@@ -63,6 +67,8 @@ export const calcHost: CalcHost = {
   },
 
   onResult(blockId, payload, cells, spill) {
+    const seq = (runSeq.get(blockId) ?? 0) + 1;
+    runSeq.set(blockId, seq);
     const st = getState();
     st.setBlockRunning(blockId, false);
     st.clearDirty(blockId);
@@ -135,6 +141,7 @@ export const calcHost: CalcHost = {
           imageBlobId = undefined;
         }
       }
+      if (runSeq.get(blockId) !== seq) return; // 그 사이 새 실행 결과가 도착함
       const label = `[${payload.typeName ?? payload.kind}${
         payload.shape ? ` ${payload.shape[0]}×${payload.shape[1]}` : ""
       }]`;

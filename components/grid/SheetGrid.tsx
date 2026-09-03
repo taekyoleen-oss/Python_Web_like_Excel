@@ -121,6 +121,8 @@ export default function SheetGrid() {
   );
 
   const flashRange = flash && flash.sheetId === sheet.id ? flash.range : null;
+  const hoverRange = useWorkbookStore((s) => s.hoverRange);
+  const editorHover = hoverRange && hoverRange.sheetId === sheet.id ? hoverRange.range : null;
 
   const theme = useMemo<Partial<Theme>>(
     () => ({
@@ -285,6 +287,33 @@ export default function SheetGrid() {
         ctx.restore();
       }
 
+      // 편집기 xl() 커서 → 점선 하이라이트 (§4.8)
+      if (editorHover && inRange(editorHover, row, col)) {
+        ctx.save();
+        ctx.strokeStyle = PRIMARY;
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([4, 3]);
+        ctx.beginPath();
+        if (row === editorHover.r0) {
+          ctx.moveTo(rect.x, rect.y + 1);
+          ctx.lineTo(rect.x + rect.width, rect.y + 1);
+        }
+        if (row === editorHover.r1) {
+          ctx.moveTo(rect.x, rect.y + rect.height - 1);
+          ctx.lineTo(rect.x + rect.width, rect.y + rect.height - 1);
+        }
+        if (col === editorHover.c0) {
+          ctx.moveTo(rect.x + 1, rect.y);
+          ctx.lineTo(rect.x + 1, rect.y + rect.height);
+        }
+        if (col === editorHover.c1) {
+          ctx.moveTo(rect.x + rect.width - 1, rect.y);
+          ctx.lineTo(rect.x + rect.width - 1, rect.y + rect.height);
+        }
+        ctx.stroke();
+        ctx.restore();
+      }
+
       // [PY] 앵커 배지 (우상단 칩)
       if (anchorBlock) {
         ctx.save();
@@ -304,7 +333,7 @@ export default function SheetGrid() {
         ctx.restore();
       }
     },
-    [anchorMap, sheet.cells, spillRanges, flashRange, runningBlocks],
+    [anchorMap, sheet.cells, spillRanges, flashRange, editorHover, runningBlocks],
   );
 
   const onCellEdited = useCallback(
@@ -384,6 +413,28 @@ export default function SheetGrid() {
     [sheet.id],
   );
 
+  /** 클릭 라우팅: 오류 셀 → 진단 탭(§2.3.7), 객체 카드 → 출력 미리보기 탭(§2.3.4) */
+  const onCellClicked = useCallback(
+    (item: Item) => {
+      const [col, row] = item;
+      const key = cellKey(row, col);
+      const cell = sheet.cells[key];
+      if (!cell?.src) return;
+      const store = useWorkbookStore.getState();
+      if (cell.t === "e") {
+        store.setSelectedBlock(cell.src);
+        store.setBottomTab("diagnostics");
+        return;
+      }
+      const anchorBlock = anchorMap.get(key);
+      if (anchorBlock && anchorBlock.outputMode === "object" && anchorBlock.last?.status === "ok") {
+        store.setSelectedBlock(anchorBlock.id);
+        store.setBottomTab("preview");
+      }
+    },
+    [sheet.cells, anchorMap],
+  );
+
   /** 우클릭: 셀 기록(+선택 이동). radix ContextMenu가 메뉴를 연다 */
   const onCellContextMenu = useCallback(
     (item: Item) => {
@@ -406,15 +457,17 @@ export default function SheetGrid() {
     [],
   );
 
-  /** 오류 셀 hover → 한국어 요약 툴팁 */
+  /** 오류 셀 hover → 한국어 요약 툴팁 · spill hover → 블록 카드 강조(§4.8) */
   const onItemHovered = useCallback(
     (args: GridMouseEventArgs) => {
       if (args.kind !== "cell") {
         setHoverTip(null);
+        useWorkbookStore.getState().setHoverBlock(null);
         return;
       }
       const [col, row] = args.location;
       const cell = sheet.cells[cellKey(row, col)];
+      useWorkbookStore.getState().setHoverBlock(cell?.src ?? null);
       if (!cell?.src) {
         setHoverTip(null);
         return;
@@ -460,6 +513,7 @@ export default function SheetGrid() {
             onDelete={onDelete}
             onColumnResize={onColumnResize}
             onCellContextMenu={onCellContextMenu}
+            onCellClicked={onCellClicked}
             onItemHovered={onItemHovered}
             drawCell={drawCell}
             freezeColumns={sheet.frozenCols ?? 0}

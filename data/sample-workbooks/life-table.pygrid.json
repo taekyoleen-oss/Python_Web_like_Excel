@@ -849,7 +849,7 @@
    },
    "outputMode": "object",
    "includeIndex": "auto",
-   "code": "df = xl(\"A1:B102\", headers=True)\nlx = [100000.0]\nfor q in df[\"qx\"][:-1]:\n    lx.append(lx[-1] * (1 - q))\ndx = [l * q for l, q in zip(lx, df[\"qx\"])]\nfig, ax = plt.subplots(figsize=(7, 4))\nax.bar(df[\"x\"], dx, color=\"#4A90C2\")\nax.set_title(\"사망자 수 분포 (dx)\")\nax.set_xlabel(\"연령\")\nfig"
+   "code": "import matplotlib.pyplot as plt\ndf = xl(\"A1:B102\", headers=True)\nlx = [100000.0]\nfor q in df[\"qx\"][:-1]:\n    lx.append(lx[-1] * (1 - q))\ndx = [l * q for l, q in zip(lx, df[\"qx\"])]\nfig, ax = plt.subplots(figsize=(7, 4))\nax.bar(df[\"x\"], dx, color=\"#4A90C2\")\nax.set_title(\"사망자 수 분포 (dx)\")\nax.set_xlabel(\"연령\")\nfig"
   }
  ],
  "initScript": "",

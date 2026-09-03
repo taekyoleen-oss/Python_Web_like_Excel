@@ -34,7 +34,8 @@
 
 - 부트 시 matplotlib을 내려받지 않는다. 초기화 스크립트의 `import matplotlib`은 `try/except ImportError`로 감싸져 있다.
 - 워커는 **모든 run/repl 전에** `loadPackagesFromImports(code)`를 돌리고, 직후 `_pygrid_mpl_setup()`(멱등)을 호출한다.
-  → 사용자가 처음 `import matplotlib` 하는 순간 패키지가 로드되고 Agg 백엔드 + Pretendard 폰트가 자동 적용된다.
+  `loadPackagesFromImports`는 다운로드만 하므로, `_pygrid_mpl_setup`이 다운로드된 matplotlib을 **직접 import**해
+  사용자 코드 실행 전에 Agg 백엔드 + Pretendard 폰트(OTF 내부 실명으로 등록)를 적용한다 — 첫 실행부터 차트 한글이 렌더된다.
 - 초기화 스크립트에는 `loadPackagesFromImports`를 적용하지 않는다(guarded import를 부트 시 내려받지 않기 위함).
   **제약**: 커스텀 초기화 스크립트가 scipy 등 미로드 패키지를 import하면 ImportError가 stderr(id 0)로 보고되고 부트는 계속된다. — TODO(후속): 초기화 스크립트용 패키지 선로드 옵션.
 

@@ -4,16 +4,21 @@
 
 
 def _pygrid_mpl_setup():
-    """matplotlib이 이미 로드된 경우에만 Agg 백엔드·Pretendard 폰트를 적용한다.
+    """matplotlib이 사용 가능해진 순간 Agg 백엔드·Pretendard 폰트를 적용한다.
 
     선택한 방식(작업 지침 §3): matplotlib은 부트 시 선로드하지 않는다(지연 로드).
     이 함수는 멱등이며, 워커가 초기화 스크립트 직후와 매 loadPackagesFromImports
-    직후에 호출한다 — 사용자가 처음 matplotlib을 import한 시점에 자동 적용된다.
+    직후에 호출한다. loadPackagesFromImports는 패키지를 *다운로드*만 하고 import하지는
+    않으므로, 다운로드된 상태라면 여기서 직접 import해 사용자 코드가 실행되기 *전에*
+    폰트·백엔드를 적용한다 — 안 그러면 첫 matplotlib 실행의 차트 한글이 □로 깨진다.
     """
     import sys
 
     if "matplotlib" not in sys.modules:
-        return
+        import importlib.util
+
+        if importlib.util.find_spec("matplotlib") is None:
+            return  # 아직 다운로드 전(지연 로드 유지) — 부트·초기화 경로에서 무해
     import matplotlib
 
     matplotlib.use("Agg")
@@ -22,10 +27,13 @@ def _pygrid_mpl_setup():
 
         from matplotlib import font_manager
 
-        if os.path.exists("/fonts/Pretendard-Regular.otf"):
-            if not any(f.name == "Pretendard" for f in font_manager.fontManager.ttflist):
-                font_manager.fontManager.addfont("/fonts/Pretendard-Regular.otf")
-            matplotlib.rcParams["font.family"] = "Pretendard"
+        _font_path = "/fonts/Pretendard-Regular.otf"
+        if os.path.exists(_font_path):
+            # OTF 내부 실명으로 등록·지정 (하드코딩 이름 불일치 방지)
+            _name = font_manager.FontProperties(fname=_font_path).get_name()
+            if not any(f.name == _name for f in font_manager.fontManager.ttflist):
+                font_manager.fontManager.addfont(_font_path)
+            matplotlib.rcParams["font.family"] = _name
         matplotlib.rcParams["axes.unicode_minus"] = False
     except Exception:
         pass  # 폰트 실패는 실행을 막지 않는다(차트 한글이 □로 보일 뿐)
