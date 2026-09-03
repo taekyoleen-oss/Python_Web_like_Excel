@@ -25,6 +25,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { colToLetter } from "@/lib/grid/a1";
+import { notifyWorkbookEdit } from "@/lib/grid/calc-host";
 import {
   classifyCell,
   inferCells,
@@ -77,6 +78,15 @@ export function applyPastedCells(
     row.forEach((cell, j) => edits.push({ r: base.r + i, c: base.c + j, cell })),
   );
   state.setCells(sheetId, edits);
+  notifyWorkbookEdit([
+    {
+      sheetId,
+      r0: base.r,
+      c0: base.c,
+      r1: base.r + cells.length - 1,
+      c1: base.c + (cells[0]?.length ?? 1) - 1,
+    },
+  ]);
   return true;
 }
 

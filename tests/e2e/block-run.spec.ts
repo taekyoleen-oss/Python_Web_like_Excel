@@ -73,9 +73,13 @@ test("G3: 실행→spill→재실행 교체→undo 복원→오류→객체 카�
   await expect
     .poll(() => srcCellCount(page), { timeout: 150_000, intervals: [1000] })
     .toBeGreaterThan(8);
+  // describe = 헤더 1행 + 통계 8행 × (index + a + b) 3열 = 27셀
   const describeCount = await srcCellCount(page);
-  const deepCell = await cellAt(page, "8:3"); // describe 9행째(D9) — 인덱스 라벨
-  expect(deepCell).not.toBeNull();
+  expect(describeCount).toBe(27);
+  expect((await cellAt(page, "0:4"))?.v).toBe("a"); // E1: 첫 값 열 헤더
+  expect((await cellAt(page, "0:5"))?.v).toBe("b"); // F1: 둘째 값 열 헤더
+  const deepCell = await cellAt(page, "8:3"); // D9: 마지막 통계 index 라벨
+  expect(deepCell?.v).toBe("max");
   expect(deepCell.src).toBeTruthy();
 
   // 2) mean() → 작은 spill로 교체, 이전 spill 완전 제거, 무관 셀 유지

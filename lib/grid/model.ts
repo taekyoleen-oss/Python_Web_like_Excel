@@ -8,6 +8,7 @@ import throttle from "lodash/throttle";
 import {
   cellKey,
   parseCellKey,
+  type CalcMode,
   type Cell,
   type CellRange,
   type OutputMode,
@@ -64,6 +65,8 @@ export interface WorkbookState {
   flash: { sheetId: string; range: CellRange } | null;
   /** Python 패널에서 포커스할 블록 (블록 추가 직후) */
   focusBlockId: string | null;
+  /** 재실행 필요 블록(수동 모드 배지) — workbook 밖 transient */
+  dirtyBlocks: Record<string, true>;
   /** spill 잠김(src) 셀이면 false를 반환하고 아무것도 바꾸지 않는다 */
   setCellValue: (sheetId: string, r: number, c: number, cell: Cell | null) => boolean;
   /** 일괄 편집 = 한 트랜잭션 = 한 undo 단계 */
@@ -105,6 +108,9 @@ export interface WorkbookState {
   setBlockRunning: (id: string, running: boolean) => void;
   setFlash: (flash: { sheetId: string; range: CellRange } | null) => void;
   setFocusBlock: (id: string | null) => void;
+  markDirty: (ids: string[]) => void;
+  clearDirty: (id: string) => void;
+  setCalcMode: (mode: CalcMode) => void;
 }
 
 const norm = (rg: CellRange): CellRange => ({
@@ -182,6 +188,7 @@ export const createWorkbookStore = () => {
           runningBlocks: {},
           flash: null,
           focusBlockId: null,
+          dirtyBlocks: {},
 
           setCellValue: (sheetId, r, c, cell) => {
             const sheet = get().workbook.sheets.find((s) => s.id === sheetId);
@@ -423,6 +430,7 @@ export const createWorkbookStore = () => {
               }
               state.workbook.pyBlocks.splice(idx, 1);
               delete state.runningBlocks[id];
+              delete state.dirtyBlocks[id];
               if (state.focusBlockId === id) state.focusBlockId = null;
             }),
 
@@ -476,6 +484,21 @@ export const createWorkbookStore = () => {
           setFocusBlock: (id) =>
             set((state) => {
               state.focusBlockId = id;
+            }),
+
+          markDirty: (ids) =>
+            set((state) => {
+              for (const id of ids) state.dirtyBlocks[id] = true;
+            }),
+
+          clearDirty: (id) =>
+            set((state) => {
+              delete state.dirtyBlocks[id];
+            }),
+
+          setCalcMode: (mode) =>
+            set((state) => {
+              state.workbook.calcMode = mode;
             }),
         };
       }),

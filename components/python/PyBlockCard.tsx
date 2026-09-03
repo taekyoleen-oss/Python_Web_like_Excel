@@ -14,6 +14,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { formatA1 } from "@/lib/grid/a1";
+import { notifyWorkbookEdit } from "@/lib/grid/calc-host";
 import { useWorkbookStore } from "@/lib/grid/model";
 import { runBlock } from "@/lib/grid/run-block";
 import type { OutputMode, PyBlock } from "@/types/workbook";
@@ -36,6 +37,7 @@ function statusBadge(block: PyBlock, running: boolean) {
 
 export default function PyBlockCard({ block }: { block: PyBlock }) {
   const running = useWorkbookStore((s) => !!s.runningBlocks[block.id]);
+  const dirty = useWorkbookStore((s) => !!s.dirtyBlocks[block.id]);
   const focusBlockId = useWorkbookStore((s) => s.focusBlockId);
   const sheetName = useWorkbookStore(
     (s) => s.workbook.sheets.find((sh) => sh.id === block.sheetId)?.name ?? "?",
@@ -60,22 +62,24 @@ export default function PyBlockCard({ block }: { block: PyBlock }) {
 
   useEffect(() => () => clearTimeout(debounceRef.current), []);
 
-  const commitCode = (value: string) => {
+  /** 코드 확정. notify면 자동 재계산/dirty 배지 통지 (§2.3.3 코드 저장 → dirty) */
+  const commitCode = (value: string, notify: boolean) => {
     clearTimeout(debounceRef.current);
+    const changed = useWorkbookStore.getState().workbook.pyBlocks.find(
+      (b) => b.id === block.id,
+    )?.code !== value;
     useWorkbookStore.getState().setBlockCode(block.id, value);
+    if (notify && changed) notifyWorkbookEdit([], [block.id]);
   };
 
   const onChange = (value: string) => {
     setCode(value);
     clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(
-      () => useWorkbookStore.getState().setBlockCode(block.id, value),
-      500,
-    );
+    debounceRef.current = setTimeout(() => commitCode(value, true), 500);
   };
 
   const run = () => {
-    commitCode(code); // 디바운스 대기 중 코드 확정 후 실행
+    commitCode(code, false); // ▶가 직접 실행하므로 통지 없이 확정만 (이중 실행 방지)
     void runBlock(block.id);
   };
 
@@ -125,6 +129,13 @@ export default function PyBlockCard({ block }: { block: PyBlock }) {
           </SelectContent>
         </Select>
         {statusBadge(block, running)}
+        {dirty && !running && (
+          <span
+            className="size-1.5 shrink-0 rounded-full bg-warning"
+            title="변경됨 — 재실행 필요"
+            aria-label="dirty"
+          />
+        )}
         <div className="ml-auto flex items-center gap-0.5">
           <Button
             variant="ghost"
@@ -151,7 +162,7 @@ export default function PyBlockCard({ block }: { block: PyBlock }) {
         ref={textareaRef}
         value={code}
         onChange={(e) => onChange(e.target.value)}
-        onBlur={() => commitCode(code)}
+        onBlur={() => commitCode(code, true)}
         onKeyDown={(e) => {
           if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
             e.preventDefault();

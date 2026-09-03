@@ -3,6 +3,7 @@
 // 그리드 툴바 — 행/열 삽입·삭제, 열 고정, 정렬 + 후속 마일스톤 자리표시 버튼
 
 import { useEffect, useState, type ReactNode } from "react";
+import { toast } from "sonner";
 import {
   ClipboardText,
   Play,
@@ -29,11 +30,13 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { setCalcModeEverywhere } from "@/lib/grid/calc-host";
 import type { DateOrder } from "@/lib/grid/clipboard/infer";
 import { parseClipboard } from "@/lib/grid/clipboard/parse";
 import { useWorkbookStore, type CellEdit } from "@/lib/grid/model";
 import { addBlockAtSelection, runAllBlocks } from "@/lib/grid/run-block";
 import { getRuntimeClient } from "@/lib/runtime/client";
+import type { CalcMode } from "@/types/workbook";
 import {
   Select,
   SelectContent,
@@ -186,6 +189,11 @@ function sortByColumn(direction: 1 | -1): void {
   if (!sheet || !selection) return;
   const keys = Object.keys(sheet.cells);
   if (keys.length === 0) return;
+  // spill 잠금 우회 차단: 정렬 대상에 블록 결과(src) 셀이 있으면 거부 (§3.4)
+  if (keys.some((k) => sheet.cells[k].src)) {
+    toast.error("Python 블록의 결과(spill) 셀이 포함되어 정렬할 수 없습니다. 블록을 삭제하거나 코드를 수정하세요.");
+    return;
+  }
 
   let r0 = Infinity, r1 = -1, c0 = Infinity, c1 = -1;
   for (const key of keys) {
@@ -239,6 +247,7 @@ export default function GridToolbar() {
     (s) => s.workbook.sheets.find((sh) => sh.id === s.activeSheetId)?.frozenCols ?? 0,
   );
   const [pasteDialogOpen, setPasteDialogOpen] = useState(false);
+  const calcMode = useWorkbookStore((s) => s.workbook.calcMode);
 
   const store = () => useWorkbookStore.getState();
   const rowIndex = selection?.r0 ?? 0;
@@ -305,16 +314,18 @@ export default function GridToolbar() {
       <ToolButton label="실행 중단" onClick={() => getRuntimeClient().interrupt()}>
         <Stop />
       </ToolButton>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <span tabIndex={0}>
-            <Button variant="ghost" size="sm" disabled className="text-muted-foreground">
-              계산: 자동
-            </Button>
-          </span>
-        </TooltipTrigger>
-        <TooltipContent>계산 모드 — 곧 제공</TooltipContent>
-      </Tooltip>
+      <Select
+        value={calcMode}
+        onValueChange={(v) => setCalcModeEverywhere(v as CalcMode)}
+      >
+        <SelectTrigger className="h-7 w-28 text-xs" aria-label="계산 모드">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="auto">계산: 자동</SelectItem>
+          <SelectItem value="manual">계산: 수동</SelectItem>
+        </SelectContent>
+      </Select>
     </div>
   );
 }

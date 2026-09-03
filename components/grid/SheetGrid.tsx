@@ -17,6 +17,7 @@ import {
   type Theme,
 } from "@glideapps/glide-data-grid";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -25,9 +26,25 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { colToLetter, formatA1 } from "@/lib/grid/a1";
+import { notifyWorkbookEdit } from "@/lib/grid/calc-host";
 import { formatCellDisplay } from "@/lib/grid/format";
 import { useWorkbookStore } from "@/lib/grid/model";
 import { cellKey, type Cell, type CellRange, type PyBlock } from "@/types/workbook";
+
+/** §3.4: spill 잠금 안내 문구 */
+function spillLockMessage(blockId: string): string {
+  const st = useWorkbookStore.getState();
+  const block = st.workbook.pyBlocks.find((b) => b.id === blockId);
+  if (!block) return "Python 블록의 결과입니다. 코드를 수정하거나 블록을 삭제하세요";
+  const sheetName = st.workbook.sheets.find((s) => s.id === block.sheetId)?.name ?? "?";
+  const addr = formatA1({
+    r0: block.anchor.r,
+    c0: block.anchor.c,
+    r1: block.anchor.r,
+    c1: block.anchor.c,
+  });
+  return `블록 ${sheetName}!${addr}의 결과입니다. 코드를 수정하거나 블록을 삭제하세요`;
+}
 
 const EMPTY_SELECTION: GridSelection = {
   columns: CompactSelection.empty(),
@@ -188,8 +205,8 @@ export default function SheetGrid() {
         data:
           typeof cell.v === "boolean" ? (cell.v ? "TRUE" : "FALSE") : String(cell.v ?? ""),
         displayData: formatCellDisplay(cell),
-        allowOverlay: !locked,
-        readonly: locked,
+        // 잠긴(src) 셀도 편집 시도는 허용 — 커밋 시 스토어가 거부하고 안내 toast (§3.4)
+        allowOverlay: true,
         contentAlign,
         themeOverride,
       };
@@ -294,9 +311,16 @@ export default function SheetGrid() {
     (item: Item, newValue: EditableGridCell) => {
       if (newValue.kind !== GridCellKind.Text) return;
       const [col, row] = item;
-      useWorkbookStore.getState().setCellValue(sheet.id, row, col, inferCell(newValue.data));
+      const store = useWorkbookStore.getState();
+      const ok = store.setCellValue(sheet.id, row, col, inferCell(newValue.data));
+      if (!ok) {
+        const src = sheet.cells[cellKey(row, col)]?.src;
+        if (src) toast.error(spillLockMessage(src), { id: "spill-lock" });
+        return;
+      }
+      notifyWorkbookEdit([{ sheetId: sheet.id, r0: row, c0: col, r1: row, c1: col }]);
     },
-    [sheet.id],
+    [sheet],
   );
 
   const onGridSelectionChange = useCallback(
@@ -328,22 +352,25 @@ export default function SheetGrid() {
   const onDelete = useCallback(
     (sel: GridSelection): boolean => {
       const store = useWorkbookStore.getState();
+      // ponytail: 행/열 헤더 선택은 행·열마다 clearRange 한 번 — 대량 선택이 느려지면 단일 패스로
+      const cleared: { r0: number; c0: number; r1: number; c1: number }[] = [];
       if (sel.current) {
         for (const r of [sel.current.range, ...sel.current.rangeStack]) {
-          store.clearRange(sheet.id, {
-            r0: r.y,
-            c0: r.x,
-            r1: r.y + r.height - 1,
-            c1: r.x + r.width - 1,
-          });
+          const range = { r0: r.y, c0: r.x, r1: r.y + r.height - 1, c1: r.x + r.width - 1 };
+          store.clearRange(sheet.id, range);
+          cleared.push(range);
         }
       }
-      // ponytail: 행/열 헤더 선택은 행·열마다 clearRange 한 번 — 대량 선택이 느려지면 단일 패스로
       for (const r of sel.rows) {
         store.clearRange(sheet.id, { r0: r, c0: 0, r1: r, c1: sheet.colCount - 1 });
+        cleared.push({ r0: r, c0: 0, r1: r, c1: sheet.colCount - 1 });
       }
       for (const c of sel.columns) {
         store.clearRange(sheet.id, { r0: 0, c0: c, r1: sheet.rowCount - 1, c1: c });
+        cleared.push({ r0: 0, c0: c, r1: sheet.rowCount - 1, c1: c });
+      }
+      if (cleared.length > 0) {
+        notifyWorkbookEdit(cleared.map((r) => ({ ...r, sheetId: sheet.id })));
       }
       return false; // 삭제는 스토어에서 처리했으므로 glide 기본 동작 차단
     },
@@ -388,19 +415,18 @@ export default function SheetGrid() {
       }
       const [col, row] = args.location;
       const cell = sheet.cells[cellKey(row, col)];
-      if (!cell || cell.t !== "e" || !cell.src) {
+      if (!cell?.src) {
         setHoverTip(null);
         return;
       }
-      const summary = blockById.get(cell.src)?.last?.summaryKo;
-      if (!summary) {
-        setHoverTip(null);
-        return;
-      }
+      // 오류 셀 → 한국어 요약, 그 외 src(spill 잠금) 셀 → 잠금 안내 (§3.4)
+      const text =
+        (cell.t === "e" ? blockById.get(cell.src)?.last?.summaryKo : undefined) ??
+        spillLockMessage(cell.src);
       setHoverTip({
         x: args.bounds.x,
         y: args.bounds.y + args.bounds.height + 4,
-        text: summary,
+        text,
       });
     },
     [sheet.cells, blockById],
