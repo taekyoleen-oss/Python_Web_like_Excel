@@ -72,6 +72,22 @@
     "pass": true
   },
   {
+    "row": "빈 결과(0열 DataFrame·빈 list) → 값 모드 1×1 빈 셀 보장",
+    "pass": true
+  },
+  {
+    "row": "초 미만 datetime → 초 단위 절단 (f 서식과 일치, #10)",
+    "pass": true
+  },
+  {
+    "row": "들쭉날쭉한 중첩 list → 빈 셀 패딩 + 직사각 shape (#11)",
+    "pass": true
+  },
+  {
+    "row": "xl 별칭 호출 → 분석 누락 + 런타임 안전망 (#14, parity #4)",
+    "pass": true
+  },
+  {
     "row": "xl 미주입 참조 → RuntimeError 안전망",
     "pass": true
   },

@@ -33,7 +33,8 @@ def _pygrid_cell(v):
         ts = pd.Timestamp(v)
         if ts.hour == ts.minute == ts.second == 0 and ts.microsecond == 0 and ts.nanosecond == 0:
             return {"v": ts.strftime("%Y-%m-%d"), "t": "d", "f": "yyyy-mm-dd"}
-        return {"v": ts.isoformat(sep=" "), "t": "d", "f": "yyyy-mm-dd hh:mm:ss"}
+        # 초 미만은 f 서식과 맞춰 잘라낸다 (경계 케이스 로그 #10)
+        return {"v": ts.strftime("%Y-%m-%d %H:%M:%S"), "t": "d", "f": "yyyy-mm-dd hh:mm:ss"}
     if isinstance(v, str):
         return {"v": v, "t": "s"}
     return {"v": str(v), "t": "s"}  # 그 외 객체 → str() 1셀 (§3.3)
@@ -88,7 +89,12 @@ def _pygrid_to_cells(value, include_index):
         ]
     if isinstance(value, (list, tuple)):
         if value and all(isinstance(r, (list, tuple)) for r in value):
-            return [[_pygrid_cell(x) for x in row] for row in value]
+            # 들쭉날쭉한 행은 최대 너비로 빈 셀 패딩 (경계 케이스 로그 #11)
+            width = max(len(r) for r in value)
+            return [
+                [_pygrid_cell(x) for x in row] + [{"v": None, "t": "s"}] * (width - len(row))
+                for row in value
+            ]
         return [[_pygrid_cell(x)] for x in value] or [[{"v": None, "t": "s"}]]
     return [[_pygrid_cell(value)]]  # 스칼라·그 외 객체
 
@@ -154,7 +160,10 @@ def _pygrid_convert(value, output_mode, include_index):
                 "tb": "",
             }
         cells = _pygrid_to_cells(value, include_index)
-        shape = [len(cells), len(cells[0]) if cells else 0]
+        if not cells or not cells[0]:
+            # 빈 DataFrame(0열)·빈 list/Series/ndarray → 항상 유효한 1×1 빈 셀 보장
+            cells = [[{"v": None, "t": "s"}]]
+        shape = [len(cells), len(cells[0])]
         kind = "scalar" if shape == [1, 1] else "table"
         return {
             "ok": True,

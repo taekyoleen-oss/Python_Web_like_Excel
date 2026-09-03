@@ -324,6 +324,44 @@ row("extract_refs: 비리터럴 인수 → 한국어 오류 (§2.4)", () => {
   expect(h.message).toBe("xl() headers 인수는 True/False 리터럴이어야 합니다");
 });
 
+row("빈 결과(0열 DataFrame·빈 list) → 값 모드 1×1 빈 셀 보장", () => {
+  const emptyDf = runConvert("import pandas as pd\npd.DataFrame()");
+  expect(emptyDf.cells).toEqual([[{ v: null, t: "s" }]]);
+  expect(emptyDf.shape).toEqual([1, 1]);
+  expect(runConvert("[]").cells).toEqual([[{ v: null, t: "s" }]]);
+  expect(runConvert("import numpy as np\nnp.array([])").cells).toEqual([[{ v: null, t: "s" }]]);
+});
+
+row("초 미만 datetime → 초 단위 절단 (f 서식과 일치, #10)", () => {
+  expect(
+    runConvert('import datetime\ndatetime.datetime(2026, 9, 2, 10, 30, 15, 123456)').cells,
+  ).toEqual([[{ v: "2026-09-02 10:30:15", t: "d", f: "yyyy-mm-dd hh:mm:ss" }]]);
+});
+
+row("들쭉날쭉한 중첩 list → 빈 셀 패딩 + 직사각 shape (#11)", () => {
+  const r = runConvert("[[1, 2], [3]]");
+  expect(r.shape).toEqual([2, 2]);
+  expect(r.cells).toEqual([
+    [
+      { v: 1, t: "n" },
+      { v: 2, t: "n" },
+    ],
+    [
+      { v: 3, t: "n" },
+      { v: null, t: "s" },
+    ],
+  ]);
+});
+
+row("xl 별칭 호출 → 분석 누락 + 런타임 안전망 (#14, parity #4)", () => {
+  const code = 'f = xl\nf("H1")';
+  expect(extractRefs(code)).toEqual({ ok: true, refs: [] }); // 별칭은 ast 분석에서 빠진다
+  py.runPython("_pygrid_xl_cache.clear()");
+  const r = runConvert(code);
+  expect(r.ok).toBe(false);
+  expect(r.etype).toBe("RuntimeError"); // 안전망
+});
+
 row("xl 미주입 참조 → RuntimeError 안전망", () => {
   py.runPython("_pygrid_xl_cache.clear()");
   const r = runConvert('xl("Z9")');
