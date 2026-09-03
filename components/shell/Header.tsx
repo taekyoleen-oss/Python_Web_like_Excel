@@ -3,7 +3,7 @@
 // 헤더 — 로고 · 편집 가능한 워크북 제목 · 파일 메뉴 자리표시 · 런타임 상태 슬롯
 
 import { useState, type ReactNode } from "react";
-import { Button } from "@/components/ui/button";
+import FileMenu from "@/components/shell/FileMenu";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { useWorkbookStore } from "@/lib/grid/model";
@@ -47,9 +47,7 @@ export default function Header({ children }: { children?: ReactNode }) {
           {title}
         </button>
       )}
-      <Button variant="ghost" size="sm" disabled className="text-muted-foreground">
-        최근 · 열기 · 저장 ▾
-      </Button>
+      <FileMenu />
       <div className="ml-auto flex items-center gap-2">
         {children ?? (
           <div id="runtime-status-slot" className="text-xs text-muted-foreground" />

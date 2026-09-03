@@ -15,6 +15,11 @@ import SheetGrid from "@/components/grid/SheetGrid";
 import SheetTabs from "@/components/grid/SheetTabs";
 import BottomPanel from "@/components/panels/BottomPanel";
 import PythonPanel from "@/components/python/PythonPanel";
+import {
+  loadWorkbookData,
+  openWorkbookFile,
+  SAMPLE_LIFE_TABLE,
+} from "@/components/shell/FileMenu";
 import Header from "@/components/shell/Header";
 import { RuntimeStatus } from "@/components/shell/RuntimeStatus";
 import StatusBar from "@/components/shell/StatusBar";
@@ -100,17 +105,20 @@ export default function WorkbookShell() {
     };
   }, []);
 
-  // 마운트 시: 설정 + 마지막 워크북 복원 (없으면 스토어 초기 새 워크북 유지)
+  // 마운트 시: 설정 + 마지막 워크북 복원. 없거나 실패하면 생명표 샘플 (§2.2 첫 방문)
   useEffect(() => {
     (async () => {
       try {
         const settings = await loadSettings();
         if (settings?.splitRatio) setSplitRatio(settings.splitRatio);
         if (settings?.bottomPanelHeight) setBottomHeight(settings.bottomPanelHeight);
-        if (settings?.lastWorkbookId) {
-          const wb = await getWorkbook(settings.lastWorkbookId);
-          if (wb) useWorkbookStore.getState().loadWorkbook(wb);
-        }
+        const wb = settings?.lastWorkbookId
+          ? await getWorkbook(settings.lastWorkbookId)
+          : undefined;
+        if (wb) useWorkbookStore.getState().loadWorkbook(wb);
+        else loadWorkbookData(SAMPLE_LIFE_TABLE);
+      } catch {
+        loadWorkbookData(SAMPLE_LIFE_TABLE);
       } finally {
         setRestored(true);
         // e2e 테스트가 복원 완료를 기다릴 수 있게 신호
@@ -118,6 +126,24 @@ export default function WorkbookShell() {
       }
     })();
   }, []);
+
+  // 그리드 영역 드래그 앤 드롭 열기 (§1.5)
+  const [dropActive, setDropActive] = useState(false);
+  const dropHandlers = {
+    onDragOver: (e: React.DragEvent) => {
+      if (e.dataTransfer.types.includes("Files")) {
+        e.preventDefault();
+        setDropActive(true);
+      }
+    },
+    onDragLeave: () => setDropActive(false),
+    onDrop: (e: React.DragEvent) => {
+      e.preventDefault();
+      setDropActive(false);
+      const file = e.dataTransfer.files?.[0];
+      if (file) void openWorkbookFile(file);
+    },
+  };
 
   // 드래그 종료 후 한 번 호출됨 — 분할 비율·하단 패널 높이를 설정 스토어에 보존 (§3.2)
   const onLayoutChanged = (layout: Record<string, number>) => {
@@ -147,7 +173,10 @@ export default function WorkbookShell() {
               onLayoutChanged={onLayoutChanged}
             >
               <ResizablePanel id="grid" defaultSize={`${splitRatio}%`} minSize="40%">
-                <div className="flex h-full min-w-0 flex-col">
+                <div
+                  {...dropHandlers}
+                  className={`flex h-full min-w-0 flex-col ${dropActive ? "ring-2 ring-inset ring-primary" : ""}`}
+                >
                   <SheetGrid />
                   <SheetTabs />
                 </div>

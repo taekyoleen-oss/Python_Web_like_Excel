@@ -396,6 +396,12 @@ export const createWorkbookStore = () => {
               state.workbook = fresh;
               state.activeSheetId = fresh.sheets[0].id;
               state.selection = null;
+              state.runningBlocks = {};
+              state.dirtyBlocks = {};
+              state.selectedBlockId = null;
+              state.lastEditorBlockId = null;
+              state.hoverBlockId = null;
+              state.flash = null;
             });
             resetHistory();
           },
@@ -405,6 +411,13 @@ export const createWorkbookStore = () => {
               state.workbook = loaded;
               state.activeSheetId = loaded.sheets[0]?.id ?? "";
               state.selection = null;
+              // 이전 워크북의 transient 상태(실행 중·dirty 등) 정리 (§M7.5)
+              state.runningBlocks = {};
+              state.dirtyBlocks = {};
+              state.selectedBlockId = null;
+              state.lastEditorBlockId = null;
+              state.hoverBlockId = null;
+              state.flash = null;
             });
             resetHistory();
           },
