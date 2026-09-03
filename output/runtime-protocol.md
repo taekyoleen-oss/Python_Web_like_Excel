@@ -114,7 +114,7 @@ run(blockId, code, snapshots?, outputMode?, includeIndex?, timeoutSec?): Promise
 repl(code, timeoutSec?): Promise<{ repr: string | null; traceback?: string }>
 analyze(code): Promise<string[]>             // 비리터럴 인수 → reject(Error(한국어 메시지))
 inspect(): Promise<VariableInfo[]>
-reset(): Promise<void>
+reset(initScript?): Promise<void>            // 새 스크립트로 리셋 가능. 주면 이후 재부트에도 그 스크립트 사용
 interrupt(): void
 terminateAndReboot(): Promise<void>
 on(event, fn): () => void                    // 'progress' | 'status' | 'stdout' | 'stderr' | 'reboot'

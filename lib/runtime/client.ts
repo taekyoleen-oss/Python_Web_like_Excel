@@ -347,11 +347,22 @@ export class RuntimeClient {
   }
 
   /** 워커 안 best-effort 리셋(사용자 전역 삭제 + 초기화 스크립트 재실행).
+   *  initScript를 주면 그 스크립트로 재설정하고, 이후 재부트에도 그 스크립트를 쓴다.
    *  완전 초기화는 terminateAndReboot() */
-  async reset(): Promise<void> {
+  async reset(initScript?: string): Promise<void> {
+    const script = initScript ?? this.bootOpts?.initScript ?? DEFAULT_INIT_SCRIPT;
+    if (this.bootOpts) {
+      this.bootOpts.initScript = script;
+    } else {
+      // 부트 전 reset 호출(큐잉됨): boot()과 같은 규칙으로 indexURL 결정
+      this.bootOpts = {
+        initScript: script,
+        indexURL: process.env.NEXT_PUBLIC_PYODIDE_INDEX_URL ?? DEFAULT_PYODIDE_INDEX_URL,
+      };
+    }
     const id = this.nextId++;
     await this.request(
-      { t: "resetRuntime", id, initScript: this.bootOpts?.initScript ?? DEFAULT_INIT_SCRIPT },
+      { t: "resetRuntime", id, initScript: script },
       { busy: true, timeoutSec: this.defaultTimeoutSec },
     );
   }

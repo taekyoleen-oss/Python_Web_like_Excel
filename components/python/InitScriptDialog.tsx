@@ -34,11 +34,8 @@ export default function InitScriptDialog() {
     setApplying(true);
     try {
       useWorkbookStore.getState().setInitScript(draft);
-      const client = getRuntimeClient();
-      // 계약 갭: client.reset()은 부트 시점 initScript를 재실행한다(새 스크립트 전달 인자 없음).
-      // 리셋으로 사용자 전역을 지운 뒤 새 스크립트를 이어서 실행해 같은 효과를 낸다.
-      await client.reset();
-      await client.repl(draft);
+      // 새 스크립트로 리셋 — 이후 재부트에도 이 스크립트가 쓰인다
+      await getRuntimeClient().reset(draft);
       toast("런타임을 재설정하고 초기화 스크립트를 적용했습니다");
       setOpen(false);
     } catch (e) {
