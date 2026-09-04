@@ -117,7 +117,14 @@ export default function PythonPanel() {
               (Ctrl+Shift+P)
             </p>
           ) : (
-            blocks.map((block) => <PyBlockCard key={block.id} block={block} />)
+            blocks.map((block, i) => (
+              <PyBlockCard
+                key={block.id}
+                block={block}
+                isFirst={i === 0}
+                isLast={i === blocks.length - 1}
+              />
+            ))
           )}
         </TabsContent>
 

@@ -55,6 +55,17 @@ export const createWorkbook = (): Workbook => {
   };
 };
 
+/** 기본 계산 순서: 시트 순 → 앵커 행 → 열 (패널 나열·↑↓ 자리 교환 공용) */
+export function blocksInOrder(workbook: Workbook): PyBlock[] {
+  const sheetIndex = new Map(workbook.sheets.map((s, i) => [s.id, i]));
+  return [...workbook.pyBlocks].sort(
+    (a, b) =>
+      (sheetIndex.get(a.sheetId) ?? 0) - (sheetIndex.get(b.sheetId) ?? 0) ||
+      a.anchor.r - b.anchor.r ||
+      a.anchor.c - b.anchor.c,
+  );
+}
+
 export interface CellEdit {
   r: number;
   c: number;
@@ -123,6 +134,12 @@ export interface WorkbookState {
     anchor: { r: number; c: number },
     sheetId?: string,
   ) => string | null;
+  /**
+   * ↑↓ 자리 교환 — 계산 순서상 이웃 블록과 {sheetId, anchor}를 맞바꾼다(= 실행 순서 변경).
+   * 한 트랜잭션: 두 블록의 spill 제거 + 자리 교환 + 양쪽 dirty.
+   * 반환값은 교환한 상대 블록 id (경계에서 교환하지 않으면 null).
+   */
+  swapBlockOrder: (id: string, direction: "up" | "down") => string | null;
   /** 블록 + 그 spill 셀 제거 (한 트랜잭션) */
   removePyBlock: (id: string) => void;
   setBlockCode: (id: string, code: string) => void;
@@ -533,6 +550,37 @@ export const createWorkbookStore = () => {
               state.anchorPickingBlockId = null;
             });
             return null;
+          },
+
+          swapBlockOrder: (id, direction) => {
+            const ordered = blocksInOrder(get().workbook);
+            const i = ordered.findIndex((b) => b.id === id);
+            const j = direction === "up" ? i - 1 : i + 1;
+            if (i < 0 || j < 0 || j >= ordered.length) return null; // 경계
+            const otherId = ordered[j].id;
+            set((state) => {
+              const a = state.workbook.pyBlocks.find((b) => b.id === id);
+              const b = state.workbook.pyBlocks.find((x) => x.id === otherId);
+              if (!a || !b) return;
+              for (const blk of [a, b]) {
+                const sheet = state.workbook.sheets.find((s) => s.id === blk.sheetId);
+                if (sheet) {
+                  for (const key of Object.keys(sheet.cells)) {
+                    if (sheet.cells[key].src === blk.id) delete sheet.cells[key];
+                  }
+                }
+                if (blk.last?.spillRange) delete blk.last.spillRange;
+                state.dirtyBlocks[blk.id] = true;
+              }
+              // draft 별칭을 피하려고 평범한 값으로 먼저 복사한다
+              const posA = { sheetId: a.sheetId, anchor: { ...a.anchor } };
+              const posB = { sheetId: b.sheetId, anchor: { ...b.anchor } };
+              a.sheetId = posB.sheetId;
+              a.anchor = posB.anchor;
+              b.sheetId = posA.sheetId;
+              b.anchor = posA.anchor;
+            });
+            return otherId;
           },
 
           removePyBlock: (id) =>

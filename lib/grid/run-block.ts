@@ -1,7 +1,7 @@
 // 블록 실행 공개 API — M5: RunCoordinator(calc-engine) 배선. 반영 로직은 calc-host.ts.
 
 import { toast } from "sonner";
-import type { BlockKind, PyBlock, Workbook } from "@/types/workbook";
+import type { BlockKind } from "@/types/workbook";
 import { formatA1 } from "./a1";
 import { getCoordinator, makeView, notifyWorkbookEdit, toastIfQueued } from "./calc-host";
 import { useWorkbookStore } from "./model";
@@ -18,15 +18,18 @@ export async function runAllBlocks(): Promise<void> {
   await getCoordinator().runAll(makeView());
 }
 
-/** 기본 계산 순서: 시트 순 → 앵커 행 → 열 (패널 나열용) */
-export function blocksInOrder(workbook: Workbook): PyBlock[] {
-  const sheetIndex = new Map(workbook.sheets.map((s, i) => [s.id, i]));
-  return [...workbook.pyBlocks].sort(
-    (a, b) =>
-      (sheetIndex.get(a.sheetId) ?? 0) - (sheetIndex.get(b.sheetId) ?? 0) ||
-      a.anchor.r - b.anchor.r ||
-      a.anchor.c - b.anchor.c,
+// 계산 순서 헬퍼는 스토어(model.ts)가 ↑↓ 교환에 직접 쓰므로 그곳에 있다
+export { blocksInOrder } from "./model";
+
+/** ↑↓ 자리 교환 — 성공하면 자동 모드는 두 블록 재실행, 수동 모드는 dirty 배지 */
+export function moveBlock(blockId: string, direction: "up" | "down"): void {
+  const otherId = useWorkbookStore.getState().swapBlockOrder(blockId, direction);
+  if (!otherId) return;
+  const blocks = useWorkbookStore.getState().workbook.pyBlocks;
+  const runnable = [blockId, otherId].filter(
+    (id) => blocks.find((b) => b.id === id)?.kind !== "markdown",
   );
+  if (runnable.length > 0) notifyWorkbookEdit([], runnable);
 }
 
 function addAtSelection(kind: BlockKind): void {

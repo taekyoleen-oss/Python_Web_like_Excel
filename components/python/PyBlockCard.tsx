@@ -1,13 +1,16 @@
 "use client";
 
-// 블록 카드 — 헤더(접기·앵커·제목·모드·상태·실행·삭제) + 출력 선택 + 편집기.
+// 블록 카드 (Colab 스타일 셀) — 왼쪽 원형 ▶ + hover 시 떠오르는 우상단 툴바(위·아래·편집·삭제·더보기).
+// 헤더에는 접기·앵커·제목·상태만 남기고 보조 조작은 ⋮ 메뉴로 모은다.
 // kind==='markdown'이면 실행 UI 없이 마크다운 편집/미리보기만 (셀에 아무것도 쓰지 않는다).
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  ArrowDown,
+  ArrowUp,
   CaretDown,
   CaretRight,
-  Crosshair,
+  DotsThreeVertical,
   Eye,
   NotePencil,
   Play,
@@ -25,7 +28,12 @@ import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSeparator,
+  DropdownMenuShortcut,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
@@ -41,7 +49,7 @@ import { formatA1 } from "@/lib/grid/a1";
 import { notifyWorkbookEdit } from "@/lib/grid/calc-host";
 import { renderMarkdown } from "@/lib/grid/markdown";
 import { useWorkbookStore } from "@/lib/grid/model";
-import { runBlock } from "@/lib/grid/run-block";
+import { moveBlock, runBlock } from "@/lib/grid/run-block";
 import { getRuntimeClient } from "@/lib/runtime/client";
 import { cn } from "@/lib/utils";
 import { cellKey, type OutputMode, type OutputSelection, type PyBlock } from "@/types/workbook";
@@ -202,9 +210,8 @@ function ColumnsMenu({ block }: { block: PyBlock }) {
   );
 }
 
-/** 출력 행: 변수·열·행 제한 + 출력 위치 지정 */
+/** 출력 행: 변수·열·행 제한 (출력 위치 지정은 ⋮ 메뉴) */
 function OutputRow({ block }: { block: PyBlock }) {
-  const picking = useWorkbookStore((s) => s.anchorPickingBlockId === block.id);
   return (
     <div className="flex flex-wrap items-center gap-1 border-b bg-muted/20 px-2 py-1">
       <span className="text-xs text-muted-foreground">출력</span>
@@ -225,21 +232,80 @@ function OutputRow({ block }: { block: PyBlock }) {
         }}
         className="h-6 w-24 px-1.5"
       />
-      <Button
-        variant={picking ? "default" : "outline"}
-        size="sm"
-        className="ml-auto h-6 gap-1 px-2 text-xs"
-        aria-pressed={picking}
-        onClick={() => store().setAnchorPicking(picking ? null : block.id)}
-      >
-        <Crosshair />
-        출력 위치 지정
-      </Button>
     </div>
   );
 }
 
-export default function PyBlockCard({ block }: { block: PyBlock }) {
+/** 앵커 셀로 이동 (헤더 주소 버튼 · ⋮ 메뉴 공용) */
+function goToAnchor(block: PyBlock): void {
+  const st = store();
+  st.setActiveSheet(block.sheetId);
+  st.setSelection({
+    r0: block.anchor.r,
+    c0: block.anchor.c,
+    r1: block.anchor.r,
+    c1: block.anchor.c,
+  });
+}
+
+/** ⋮ 더보기 — 헤더에서 밀어낸 보조 조작 */
+function MoreMenu({ block, onRun }: { block: PyBlock; onRun: () => void }) {
+  const isMarkdown = block.kind === "markdown";
+  const collapsed = !!block.collapsed;
+  const picking = useWorkbookStore((s) => s.anchorPickingBlockId === block.id);
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="icon-xs" aria-label="더보기" title="더보기">
+          <DotsThreeVertical weight="bold" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="min-w-44">
+        {!isMarkdown && (
+          <>
+            <DropdownMenuItem onClick={onRun}>
+              실행
+              <DropdownMenuShortcut>Ctrl+Enter</DropdownMenuShortcut>
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel>출력 모드</DropdownMenuLabel>
+            <DropdownMenuRadioGroup
+              value={block.outputMode}
+              onValueChange={(v) => store().setBlockOutputMode(block.id, v as OutputMode)}
+            >
+              <DropdownMenuRadioItem value="values">값 (셀로 펼치기)</DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="object">객체 (카드)</DropdownMenuRadioItem>
+            </DropdownMenuRadioGroup>
+            <DropdownMenuSeparator />
+          </>
+        )}
+        <DropdownMenuItem
+          onClick={() => store().setAnchorPicking(picking ? null : block.id)}
+        >
+          {isMarkdown ? "위치 지정" : "출력 위치 지정"}
+          {picking && <DropdownMenuShortcut>지정 중</DropdownMenuShortcut>}
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => goToAnchor(block)}>앵커 셀로 이동</DropdownMenuItem>
+        <DropdownMenuItem
+          onClick={() => store().setBlockCollapsed(block.id, !collapsed)}
+        >
+          {collapsed ? "펼치기" : "접기"}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+export default function PyBlockCard({
+  block,
+  isFirst,
+  isLast,
+}: {
+  block: PyBlock;
+  /** 계산 순서상 처음/마지막 — ↑↓ 비활성화용 (패널이 계산해 넘긴다) */
+  isFirst?: boolean;
+  isLast?: boolean;
+}) {
   const isMarkdown = block.kind === "markdown";
   const running = useWorkbookStore((s) => !!s.runningBlocks[block.id]);
   const dirty = useWorkbookStore((s) => !!s.dirtyBlocks[block.id]);
@@ -304,17 +370,6 @@ export default function PyBlockCard({ block }: { block: PyBlock }) {
     void runBlock(block.id);
   };
 
-  const goToAnchor = () => {
-    const st = store();
-    st.setActiveSheet(block.sheetId);
-    st.setSelection({
-      r0: block.anchor.r,
-      c0: block.anchor.c,
-      r1: block.anchor.r,
-      c1: block.anchor.c,
-    });
-  };
-
   const anchorLabel = `${sheetName}!${formatA1({
     r0: block.anchor.r,
     c0: block.anchor.c,
@@ -331,13 +386,14 @@ export default function PyBlockCard({ block }: { block: PyBlock }) {
     <div
       ref={cardRef}
       className={cn(
-        "rounded border bg-card transition-shadow",
+        "group relative rounded border bg-card transition-shadow",
         hovered && "border-primary/60 shadow-[0_0_0_2px_#EAF3FA]", // spill hover → 카드 강조 (§4.8)
         picking && "border-primary",
       )}
       data-block-id={block.id}
       data-block-kind={isMarkdown ? "markdown" : "code"}
     >
+      {/* 헤더 — 접기·앵커·상태·제목만 */}
       <div className="flex items-center gap-1.5 border-b bg-muted/40 px-2 py-1">
         <button
           onClick={() => store().setBlockCollapsed(block.id, !collapsed)}
@@ -349,40 +405,16 @@ export default function PyBlockCard({ block }: { block: PyBlock }) {
           {collapsed ? <CaretRight className="size-3.5" /> : <CaretDown className="size-3.5" />}
         </button>
         <button
-          onClick={goToAnchor}
+          onClick={() => goToAnchor(block)}
           className="shrink-0 font-mono text-xs text-foreground/80 hover:text-primary"
           title="앵커 셀로 이동"
         >
           {anchorLabel}
         </button>
         {isMarkdown ? (
-          <>
-            <span className="min-w-0 flex-1 truncate text-xs font-medium">
-              {block.title || <span className="text-muted-foreground">제목 없음</span>}
-            </span>
-            <Badge variant="secondary">마크다운</Badge>
-          </>
+          <Badge variant="secondary">마크다운</Badge>
         ) : (
           <>
-            <Input
-              value={block.title ?? ""}
-              onChange={(e) => store().setBlockTitle(block.id, e.target.value)}
-              placeholder="제목 없음"
-              aria-label="블록 제목"
-              className="h-6 min-w-0 flex-1 px-1.5"
-            />
-            <Select
-              value={block.outputMode}
-              onValueChange={(v) => store().setBlockOutputMode(block.id, v as OutputMode)}
-            >
-              <SelectTrigger className="h-6 w-16 text-xs" aria-label="출력 모드">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="values">값</SelectItem>
-                <SelectItem value="object">객체</SelectItem>
-              </SelectContent>
-            </Select>
             {statusBadge(block, running)}
             {dirty && !running && (
               <span
@@ -393,117 +425,177 @@ export default function PyBlockCard({ block }: { block: PyBlock }) {
             )}
           </>
         )}
-        <div className="ml-auto flex items-center gap-0.5">
-          {isMarkdown ? (
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              onClick={() => setEditingMd((v) => !v)}
-              aria-label={editingMd ? "마크다운 미리보기" : "마크다운 편집"}
-              title={editingMd ? "미리보기" : "편집"}
-            >
-              {editingMd ? <Eye /> : <NotePencil />}
-            </Button>
-          ) : (
-            <Button
-              variant="default"
-              size="icon-sm"
-              onClick={run}
-              disabled={running}
-              aria-label="실행"
-              title="실행 (Ctrl+Enter)"
-            >
-              <Play weight="fill" />
-            </Button>
-          )}
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            onClick={() => store().removePyBlock(block.id)}
-            aria-label="블록 삭제"
-            title="블록 삭제"
-          >
-            <TrashSimple />
-          </Button>
-        </div>
+        {isMarkdown ? (
+          <span className="min-w-0 flex-1 truncate text-xs font-medium">
+            {block.title || <span className="text-muted-foreground">제목 없음</span>}
+          </span>
+        ) : (
+          <Input
+            value={block.title ?? ""}
+            onChange={(e) => store().setBlockTitle(block.id, e.target.value)}
+            placeholder="제목 없음"
+            aria-label="블록 제목"
+            className="h-6 min-w-0 flex-1 px-1.5"
+          />
+        )}
       </div>
 
-      {collapsed ? null : isMarkdown ? (
-        editingMd ? (
-          <textarea
-            ref={mdRef}
-            value={block.markdown ?? ""}
-            onChange={(e) => store().setBlockMarkdown(block.id, e.target.value)}
-            onBlur={() => setEditingMd(false)}
-            rows={6}
-            placeholder={"# 제목\n\n설명을 적으세요. **굵게**, `코드`, [링크](https://example.com)"}
-            aria-label="마크다운"
-            className="w-full resize-y bg-card p-2 font-mono text-xs outline-none placeholder:text-muted-foreground"
-          />
-        ) : (
-          <div
-            onDoubleClick={() => setEditingMd(true)}
-            data-testid="markdown-preview"
-            className="space-y-1 px-2 py-2"
-            title="더블클릭하여 편집"
+      {/* 떠 있는 셀 툴바 — hover·포커스에서만 보이지만 DOM에는 항상 있어 Tab으로 닿는다 */}
+      <div
+        data-testid="cell-toolbar"
+        className="pointer-events-none absolute right-1 top-0.5 z-10 flex items-center rounded border bg-card p-0.5 opacity-0 shadow-sm transition-opacity group-focus-within:pointer-events-auto group-focus-within:opacity-100 group-hover:pointer-events-auto group-hover:opacity-100"
+      >
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          disabled={isFirst}
+          onClick={() => moveBlock(block.id, "up")}
+          aria-label="위로"
+          title={isFirst ? "첫 블록입니다" : "위로 — 앞 블록과 실행 순서·자리 바꾸기"}
+        >
+          <ArrowUp />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          disabled={isLast}
+          onClick={() => moveBlock(block.id, "down")}
+          aria-label="아래로"
+          title={isLast ? "마지막 블록입니다" : "아래로 — 뒤 블록과 실행 순서·자리 바꾸기"}
+        >
+          <ArrowDown />
+        </Button>
+        {isMarkdown && (
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            onClick={() => setEditingMd((v) => !v)}
+            aria-label="편집/미리보기 전환"
+            title="편집/미리보기 전환"
           >
-            {block.markdown?.trim() ? (
-              rendered
+            <NotePencil />
+          </Button>
+        )}
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          onClick={() => store().removePyBlock(block.id)}
+          aria-label="블록 삭제"
+          title="블록 삭제"
+        >
+          <TrashSimple />
+        </Button>
+        <MoreMenu block={block} onRun={run} />
+      </div>
+
+      {/* 본문 — 왼쪽 원형 실행 레일 + 내용 */}
+      {!collapsed && (
+        <div className="flex">
+          <div className="flex w-9 shrink-0 justify-center py-1.5">
+            {isMarkdown ? (
+              <Button
+                variant="ghost"
+                className="size-7 rounded-full p-0"
+                onClick={() => setEditingMd((v) => !v)}
+                aria-label={editingMd ? "마크다운 미리보기" : "마크다운 편집"}
+                title={editingMd ? "미리보기" : "편집"}
+              >
+                {editingMd ? <Eye /> : <NotePencil />}
+              </Button>
             ) : (
-              <p className="text-xs text-muted-foreground">
-                더블클릭하여 마크다운을 입력하세요
-              </p>
+              <Button
+                variant="ghost"
+                className="size-7 rounded-full border p-0 hover:bg-accent"
+                onClick={run}
+                disabled={running}
+                aria-label="실행"
+                title="실행 (Ctrl+Enter)"
+              >
+                <Play weight="fill" className="text-primary" />
+              </Button>
             )}
           </div>
-        )
-      ) : (
-        <>
-          <OutputRow block={block} />
-          {narrow ? (
-            <>
-              <button
-                onClick={() => setEditorOpen(true)}
-                className="w-full truncate bg-code-bg px-2 py-2 text-left font-mono text-xs text-muted-foreground"
-              >
-                {block.code.split("\n")[0] || "코드 편집 (전체 화면)…"}
-              </button>
-              <Dialog open={editorOpen} onOpenChange={setEditorOpen}>
-                <DialogContent className="h-[85vh] max-w-full p-3">
-                  <DialogHeader>
-                    <DialogTitle className="text-sm">{anchorLabel} 코드 편집</DialogTitle>
-                  </DialogHeader>
-                  <div className="min-h-0 flex-1 overflow-auto rounded border">
-                    <CodeEditor
-                      blockId={block.id}
-                      sheetId={block.sheetId}
-                      value={block.code}
-                      onChange={onChange}
-                      onRun={run}
-                      className="max-h-full"
-                    />
+
+          <div className="min-w-0 flex-1 border-l">
+            {isMarkdown ? (
+              editingMd ? (
+                <textarea
+                  ref={mdRef}
+                  value={block.markdown ?? ""}
+                  onChange={(e) => store().setBlockMarkdown(block.id, e.target.value)}
+                  onBlur={() => setEditingMd(false)}
+                  rows={6}
+                  placeholder={"# 제목\n\n설명을 적으세요. **굵게**, `코드`, [링크](https://example.com)"}
+                  aria-label="마크다운"
+                  className="w-full resize-y bg-card p-2 font-mono text-xs outline-none placeholder:text-muted-foreground"
+                />
+              ) : (
+                <div
+                  onDoubleClick={() => setEditingMd(true)}
+                  data-testid="markdown-preview"
+                  className="space-y-1 px-2 py-2"
+                  title="더블클릭하여 편집"
+                >
+                  {block.markdown?.trim() ? (
+                    rendered
+                  ) : (
+                    <p className="text-xs text-muted-foreground">
+                      더블클릭하여 마크다운을 입력하세요
+                    </p>
+                  )}
+                </div>
+              )
+            ) : (
+              <>
+                <OutputRow block={block} />
+                {narrow ? (
+                  <>
+                    <button
+                      onClick={() => setEditorOpen(true)}
+                      className="w-full truncate bg-code-bg px-2 py-2 text-left font-mono text-xs text-muted-foreground"
+                    >
+                      {block.code.split("\n")[0] || "코드 편집 (전체 화면)…"}
+                    </button>
+                    <Dialog open={editorOpen} onOpenChange={setEditorOpen}>
+                      <DialogContent className="h-[85vh] max-w-full p-3">
+                        <DialogHeader>
+                          <DialogTitle className="text-sm">{anchorLabel} 코드 편집</DialogTitle>
+                        </DialogHeader>
+                        <div className="min-h-0 flex-1 overflow-auto rounded border">
+                          <CodeEditor
+                            blockId={block.id}
+                            sheetId={block.sheetId}
+                            value={block.code}
+                            onChange={onChange}
+                            onRun={run}
+                            className="max-h-full"
+                          />
+                        </div>
+                        <Button onClick={run} disabled={running} className="shrink-0">
+                          실행 (Ctrl+Enter)
+                        </Button>
+                      </DialogContent>
+                    </Dialog>
+                  </>
+                ) : (
+                  <CodeEditor
+                    blockId={block.id}
+                    sheetId={block.sheetId}
+                    value={block.code}
+                    onChange={onChange}
+                    onRun={run}
+                    placeholder={'df = xl("A1:C10", headers=True)\ndf.describe()'}
+                  />
+                )}
+                {block.last?.status === "error" && block.last.summaryKo && (
+                  <div className="border-t px-2 py-1 text-xs text-destructive">
+                    {block.last.summaryKo}
                   </div>
-                  <Button onClick={run} disabled={running} className="shrink-0">
-                    실행 (Ctrl+Enter)
-                  </Button>
-                </DialogContent>
-              </Dialog>
-            </>
-          ) : (
-            <CodeEditor
-              blockId={block.id}
-              sheetId={block.sheetId}
-              value={block.code}
-              onChange={onChange}
-              onRun={run}
-              placeholder={'df = xl("A1:C10", headers=True)\ndf.describe()'}
-            />
-          )}
-          {block.last?.status === "error" && block.last.summaryKo && (
-            <div className="border-t px-2 py-1 text-xs text-destructive">
-              {block.last.summaryKo}
-            </div>
-          )}
-        </>
+                )}
+              </>
+            )}
+          </div>
+        </div>
       )}
     </div>
   );

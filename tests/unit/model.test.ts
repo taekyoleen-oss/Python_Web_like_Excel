@@ -284,3 +284,74 @@ describe("블록 앵커 재지정·접기·출력 선택", () => {
     expect(out()).toBeUndefined();
   });
 });
+
+describe("블록 자리 교환 (↑↓)", () => {
+  const ok = (spill: { r0: number; c0: number; r1: number; c1: number }) => ({
+    status: "ok" as const,
+    stdout: "",
+    stderr: "",
+    durationMs: 1,
+    ranAt: "",
+    spillRange: spill,
+  });
+
+  it("계산 순서 이웃과 앵커 교환 + 양쪽 spill 제거·dirty, undo 한 단계", async () => {
+    const { store, sheetId } = fresh();
+    const a = store.getState().addPyBlock(sheetId, { r: 0, c: 0 })!; // A1 (첫째)
+    const b = store.getState().addPyBlock(sheetId, { r: 5, c: 0 })!; // A6 (둘째)
+    store.getState().applyBlockResult(a, [[{ v: 1, t: "n" }, { v: 2, t: "n" }]], {
+      last: ok({ r0: 0, c0: 0, r1: 0, c1: 1 }),
+      clearPrevious: true,
+    });
+    store.getState().applyBlockResult(b, [[{ v: 9, t: "n" }]], {
+      last: ok({ r0: 5, c0: 0, r1: 5, c1: 0 }),
+      clearPrevious: true,
+    });
+    await sleep(350);
+    expect(Object.keys(cells(store))).toHaveLength(3);
+    const depth = store.temporal.getState().pastStates.length;
+
+    // 아래 블록을 위로 → 첫 블록과 자리 교환
+    expect(store.getState().swapBlockOrder(b, "up")).toBe(a);
+    const byId = (id: string) => store.getState().workbook.pyBlocks.find((x) => x.id === id)!;
+    expect(byId(b).anchor).toEqual({ r: 0, c: 0 });
+    expect(byId(a).anchor).toEqual({ r: 5, c: 0 });
+    expect(Object.keys(cells(store))).toHaveLength(0); // 양쪽 spill 제거
+    expect(byId(a).last?.spillRange).toBeUndefined();
+    expect(byId(b).last?.spillRange).toBeUndefined();
+    expect(store.getState().dirtyBlocks[a]).toBe(true);
+    expect(store.getState().dirtyBlocks[b]).toBe(true);
+
+    await sleep(350);
+    expect(store.temporal.getState().pastStates.length).toBe(depth + 1); // 한 트랜잭션
+    store.temporal.getState().undo();
+    expect(byId(a).anchor).toEqual({ r: 0, c: 0 });
+    expect(byId(b).anchor).toEqual({ r: 5, c: 0 });
+    expect(Object.keys(cells(store))).toHaveLength(3);
+  });
+
+  it("경계에서는 교환하지 않는다", () => {
+    const { store, sheetId } = fresh();
+    const a = store.getState().addPyBlock(sheetId, { r: 0, c: 0 })!;
+    const b = store.getState().addPyBlock(sheetId, { r: 5, c: 0 })!;
+    expect(store.getState().swapBlockOrder(a, "up")).toBeNull(); // 첫 블록 ↑
+    expect(store.getState().swapBlockOrder(b, "down")).toBeNull(); // 마지막 블록 ↓
+    expect(store.getState().workbook.pyBlocks.map((x) => x.anchor)).toEqual([
+      { r: 0, c: 0 },
+      { r: 5, c: 0 },
+    ]);
+    expect(store.getState().dirtyBlocks).toEqual({});
+  });
+
+  it("이웃이 다른 시트면 시트까지 함께 옮긴다", () => {
+    const { store, sheetId } = fresh();
+    store.getState().addSheet();
+    const sheet2 = store.getState().workbook.sheets[1].id;
+    const a = store.getState().addPyBlock(sheetId, { r: 9, c: 0 })!; // Sheet1!A10
+    const b = store.getState().addPyBlock(sheet2, { r: 0, c: 0 })!; // Sheet2!A1 (시트 순으로 뒤)
+    expect(store.getState().swapBlockOrder(a, "down")).toBe(b);
+    const byId = (id: string) => store.getState().workbook.pyBlocks.find((x) => x.id === id)!;
+    expect(byId(a)).toMatchObject({ sheetId: sheet2, anchor: { r: 0, c: 0 } });
+    expect(byId(b)).toMatchObject({ sheetId, anchor: { r: 9, c: 0 } });
+  });
+});

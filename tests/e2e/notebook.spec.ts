@@ -1,7 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
 
 // v1.1 노트북 기능: 출력 위치 지정(앵커 재지정) · 출력 선택(변수·열·행) ·
-// 마크다운 블록 · 목차 · 블록 접기. 실제 런타임을 쓰므로 한 테스트로 묶어 부트를 1회만 치른다.
+// 마크다운 블록 · 목차 · 블록 접기 · Colab 스타일 셀 툴바(↑↓ 자리 교환).
+// 실제 런타임을 쓰므로 한 테스트로 묶어 부트를 1회만 치른다.
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -56,7 +57,7 @@ async function calibrate(page: Page) {
 const clickCell = (page: Page, cal: { x0: number; y0: number }, r: number, c: number) =>
   page.mouse.click(cal.x0 + c * 88, cal.y0 + r * 34);
 
-test("v1.1: 앵커 재지정 → 출력 변수·열·행 선택 → 마크다운·목차 → 접기", async ({ page }) => {
+test("노트북 셀: 앵커 재지정 → 출력 선택 → 마크다운·목차 → 접기 → 툴바 ↑ 자리 교환", async ({ page }) => {
   test.setTimeout(300_000);
   await page.goto("/");
   await waitForApp(page);
@@ -93,8 +94,12 @@ test("v1.1: 앵커 재지정 → 출력 변수·열·행 선택 → 마크다운
   expect((await cellAt(page, "5:4"))?.v).toBe(50); // E6 마지막 값
 
   // ── 2) 출력 위치 지정 → F10으로 앵커 이동 (옛 spill 제거 + 새 위치에 재실행)
-  await page.getByRole("button", { name: "출력 위치 지정" }).click();
+  const codeCard = page.locator('[data-block-kind="code"]');
+  await codeCard.hover(); // 툴바는 hover·포커스에서만 보인다
+  await codeCard.getByRole("button", { name: "더보기" }).click();
+  await page.getByRole("menuitem", { name: "출력 위치 지정" }).click();
   await expect(page.getByText("결과를 놓을 셀을 클릭하세요")).toBeVisible();
+  await expect(page.getByRole("menu")).toHaveCount(0); // 메뉴 닫힘(모달 해제) 후 그리드 클릭
   await clickCell(page, cal, 9, 5); // F10
   expect((await block0(page)).anchor).toEqual({ r: 9, c: 5 });
   expect(await cellAt(page, "0:3")).toBeNull(); // 옛 앵커 비워짐
@@ -159,15 +164,54 @@ test("v1.1: 앵커 재지정 → 출력 변수·열·행 선택 → 마크다운
   await expect.poll(() => selection(page)).toMatchObject({ r0: 0, c0: 9 });
   await expect(page.getByRole("heading", { name: "분석 개요" })).toBeVisible(); // 블록 탭 복귀
 
-  // ── 7) 블록 접기 — 헤더만 남고 편집기·출력 컨트롤은 숨는다
-  const codeCard = page.locator('[data-block-kind="code"]');
+  // ── 7) 블록 접기 — 헤더만 남고 편집기·출력 컨트롤·실행 레일은 숨는다
   await codeCard.getByRole("button", { name: "블록 접기" }).click();
   await expect(page.getByLabel("Python 코드")).toBeHidden();
-  await expect(codeCard.getByRole("button", { name: "출력 위치 지정" })).toBeHidden();
-  await expect(codeCard.getByRole("button", { name: "실행", exact: true })).toBeVisible();
+  await expect(codeCard.getByLabel("상위 N행")).toBeHidden();
+  await expect(codeCard.getByRole("button", { name: "실행", exact: true })).toBeHidden();
   await expect(codeCard.getByRole("button", { name: "블록 펼치기" })).toBeVisible();
+  await expect(codeCard.getByLabel("블록 제목")).toBeVisible(); // 헤더는 그대로
   expect((await block0(page)).collapsed).toBe(true);
 
   await codeCard.getByRole("button", { name: "블록 펼치기" }).click();
   await expect(page.getByLabel("Python 코드")).toBeVisible();
+
+  // ── 8) 셀 툴바 ↑ — 계산 순서 이웃(마크다운 J1)과 자리 교환 + 자동 재실행
+  const toolbar = codeCard.getByTestId("cell-toolbar");
+  const opacity = () => toolbar.evaluate((el) => getComputedStyle(el).opacity);
+  // 숨김 조건 = hover도 focus도 없을 때 (직전 클릭으로 카드 안 버튼이 포커스를 쥐고 있다)
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await page.getByRole("tab", { name: "블록" }).hover(); // 카드에서 마우스를 뗀다
+  await expect.poll(opacity).toBe("0");
+  await codeCard.hover();
+  await expect.poll(opacity).toBe("1"); // hover 시 노출
+
+  const mdBefore = await page.evaluate(
+    () =>
+      (window as any).__pygridStore
+        .getState()
+        .workbook.pyBlocks.find((b: any) => b.kind === "markdown").anchor,
+  );
+  expect(mdBefore).toEqual({ r: 0, c: 9 }); // J1 — 계산 순서상 코드 블록(F10)보다 앞
+  await codeCard.getByRole("button", { name: "위로" }).click();
+
+  expect((await block0(page)).anchor).toEqual({ r: 0, c: 9 }); // 코드 → J1
+  expect(
+    await page.evaluate(
+      () =>
+        (window as any).__pygridStore
+          .getState()
+          .workbook.pyBlocks.find((b: any) => b.kind === "markdown").anchor,
+    ),
+  ).toEqual({ r: 9, c: 5 }); // 마크다운 → F10
+  expect(await cellAt(page, "9:5")).toBeNull(); // 옛 자리의 spill 제거
+  await expect
+    .poll(async () => (await cellAt(page, "0:9"))?.v, { timeout: 90_000, intervals: [500] })
+    .toBe("a"); // 자동 모드: 새 앵커에서 재실행
+  expect(await srcCount(page)).toBe(4);
+
+  // 이제 코드 블록이 계산 순서상 첫 블록 → ↑ 비활성
+  await codeCard.hover();
+  await expect(codeCard.getByRole("button", { name: "위로" })).toBeDisabled();
+  await expect(codeCard.getByRole("button", { name: "아래로" })).toBeEnabled();
 });
