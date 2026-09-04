@@ -24,14 +24,18 @@ const getState = () => useWorkbookStore.getState();
 export function makeView(): WorkbookView {
   const wb = getState().workbook;
   return {
-    blocks: wb.pyBlocks.map(({ id, sheetId, anchor, code, outputMode, includeIndex }) => ({
-      id,
-      sheetId,
-      anchor,
-      code,
-      outputMode,
-      includeIndex,
-    })),
+    blocks: wb.pyBlocks.map(
+      ({ id, sheetId, anchor, code, outputMode, includeIndex, output, kind }) => ({
+        id,
+        sheetId,
+        anchor,
+        code,
+        outputMode,
+        includeIndex,
+        output,
+        kind,
+      }),
+    ),
     sheetOrder: wb.sheets.map((s) => s.id),
     spills: new Map(
       wb.pyBlocks.map((b) => [

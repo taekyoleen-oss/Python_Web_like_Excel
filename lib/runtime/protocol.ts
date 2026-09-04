@@ -2,7 +2,12 @@
 // 변경 시 /output/runtime-protocol.md를 함께 갱신한다.
 // 원칙: PyProxy·비직렬화 객체 금지. 이미지 ArrayBuffer는 transferable로 넘긴다.
 
-import type { CellType, IncludeIndex, OutputMode } from "@/types/workbook";
+import type {
+  CellType,
+  IncludeIndex,
+  OutputMode,
+  OutputSelection,
+} from "@/types/workbook";
 
 /** xl() 참조 범위의 2D 스냅샷. 단일 셀 참조도 1×1 2D로 전달하고, 스칼라 변환은 xl.py가 참조 형태를 보고 결정한다 */
 export interface RangeSnapshot {
@@ -90,6 +95,8 @@ export type MainToWorker =
       snapshots: Record<string, RangeSnapshot>;
       outputMode: OutputMode;
       includeIndex: IncludeIndex;
+      /** 출력 선택: 마지막 표현식 대신 특정 변수 / DataFrame 열·행 제한 */
+      output?: OutputSelection;
     }
   | { t: "repl"; id: number; code: string }
   | { t: "inspect"; id: number }

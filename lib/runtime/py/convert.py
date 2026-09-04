@@ -148,6 +148,41 @@ def _pygrid_to_preview(value):
     return "object", shape, {"kind": "repr", "repr": _pygrid_repr(value)}, None
 
 
+def _pygrid_select_output(value, output):
+    """출력 선택의 열·행 필터를 §3.3 변환 **전에** 적용한다.
+
+    변환 전에 값을 좁히므로 값 모드(spill)와 객체 모드(preview/shape)가 같은 선택을 반영한다.
+    variable 선택은 _pygrid_exec_capture가 처리한다(경계 케이스 로그 #15~#19).
+    """
+    if not output:
+        return value
+
+    import numpy as np
+    import pandas as pd
+
+    columns = output.get("columns")
+    if columns and isinstance(value, pd.DataFrame):
+        # 열 이름은 str()로 맞춘다 — headers=False DataFrame의 정수 컬럼도 선택 가능 (#19)
+        by_name = {}
+        for c in value.columns:
+            by_name.setdefault(str(c), c)
+        keep = [by_name[c] for c in columns if c in by_name]
+        if keep:  # 요청 열이 하나도 없으면 전체 열 유지 — 빈 spill 방지 (#16)
+            value = value[keep]
+
+    limit = output.get("rowLimit")
+    if isinstance(limit, (int, float)) and limit > 0:  # 0 이하는 무제한 (#17)
+        n = int(limit)
+        if isinstance(value, (pd.DataFrame, pd.Series)):
+            value = value.iloc[:n]
+        elif isinstance(value, np.ndarray) and value.ndim in (1, 2):
+            value = value[:n]
+        elif isinstance(value, (list, tuple)):
+            value = value[:n]
+        # 그 외(스칼라·dict·Figure·객체)는 행 개념이 없어 무시한다
+    return value
+
+
 def _pygrid_convert(value, output_mode, include_index):
     """마지막 표현식 값 → 결과 dict. 워커가 JSON으로 받아 RunPayload로 변환한다."""
     type_name = type(value).__name__
@@ -181,13 +216,18 @@ def _pygrid_convert(value, output_mode, include_index):
     return out
 
 
-def _pygrid_run_convert(code, output_mode, include_index):
-    """블록 실행 + 변환. 반환(JSON 문자열): _pygrid_convert 결과 또는 실패 dict."""
+def _pygrid_run_convert(code, output_mode, include_index, output_json=None):
+    """블록 실행 + 변환. 반환(JSON 문자열): _pygrid_convert 결과 또는 실패 dict.
+
+    output_json: OutputSelection(JSON 문자열) 또는 None/"null" — 없으면 기존 동작(마지막 표현식).
+    """
     import json
 
+    output = json.loads(output_json) if output_json else None
     try:
-        value = _pygrid_exec_capture(code)
-    except BaseException as e:  # KeyboardInterrupt 포함
+        value = _pygrid_exec_capture(code, (output or {}).get("variable"))
+        value = _pygrid_select_output(value, output)
+    except BaseException as e:  # KeyboardInterrupt·출력 변수 NameError 포함
         return json.dumps(
             {"ok": False, "etype": type(e).__name__, "msg": str(e), "tb": _pygrid_format_exc(e)},
             ensure_ascii=False,

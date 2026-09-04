@@ -94,5 +94,21 @@
   {
     "row": "객체 모드 DataFrame → table preview 상위 100행 + dtypes + NaN null",
     "pass": true
+  },
+  {
+    "row": "출력 선택 variable — 지정 전역 변수 (없으면 NameError, #15)",
+    "pass": true
+  },
+  {
+    "row": "출력 선택 columns — 요청 순서 부분집합, 없는 열 무시, 전부 없으면 전체 (#16)",
+    "pass": true
+  },
+  {
+    "row": "출력 선택 rowLimit — 상위 N 데이터 행(헤더 제외), 0 이하는 무제한 (#17)",
+    "pass": true
+  },
+  {
+    "row": "출력 선택 — 객체 모드 preview·shape에도 같은 선택 반영 (#18)",
+    "pass": true
   }
 ]

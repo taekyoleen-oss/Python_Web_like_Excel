@@ -106,6 +106,11 @@ export default function WorkbookShell() {
       );
     };
     const onKeyDown = (e: KeyboardEvent) => {
+      // 출력 위치 지정 취소 (§ 앵커 재지정)
+      if (e.key === "Escape" && useWorkbookStore.getState().anchorPickingBlockId) {
+        useWorkbookStore.getState().setAnchorPicking(null);
+        return;
+      }
       // 패널 포커스 이동은 텍스트 입력 중에도 동작 (Ctrl+숫자는 브라우저 탭 예약이라 Alt+숫자 병용)
       if ((e.ctrlKey || e.metaKey || e.altKey) && ["1", "2", "3"].includes(e.key)) {
         e.preventDefault();

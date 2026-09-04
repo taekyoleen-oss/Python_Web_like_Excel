@@ -19,11 +19,17 @@ export default function StatusBar({ saveStatus }: { saveStatus: SaveStatus }) {
   const calcMode = useWorkbookStore((s) => s.workbook.calcMode);
   const blockCount = useWorkbookStore((s) => s.workbook.pyBlocks.length);
   const dirtyCount = useWorkbookStore((s) => Object.keys(s.dirtyBlocks).length);
+  const picking = useWorkbookStore((s) => !!s.anchorPickingBlockId);
 
   return (
     <div className="flex h-7 shrink-0 items-center gap-4 border-t bg-muted/60 px-3 text-xs text-muted-foreground">
       <span className="font-mono">{selection ? formatA1(selection) : "선택 없음"}</span>
       <span>시트 {sheetCount}</span>
+      {picking && (
+        <span className="font-medium text-primary">
+          결과를 놓을 셀을 클릭하세요 · Esc 취소
+        </span>
+      )}
       <span className="ml-auto">
         블록 {blockCount}
         {dirtyCount > 0 ? ` (dirty ${dirtyCount})` : ""}

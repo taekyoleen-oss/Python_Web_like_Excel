@@ -52,7 +52,7 @@
 | `boot` | indexURL, packages, initScript, fontUrl | 부트. 워커당 1회(중복 무시) |
 | `setInterruptBuffer` | buffer: SharedArrayBuffer | 인터럽트 버퍼. 체인 밖에서 즉시 적용(부트 전이면 보관) |
 | `analyze` | id, code | `xl()` 참조 추출(ast). 리터럴 위반 → `analyzeError` |
-| `run` | id, blockId, code, snapshots, outputMode, includeIndex | 블록 실행: 스냅샷 주입 → 실행 → §3.3 변환 |
+| `run` | id, blockId, code, snapshots, outputMode, includeIndex, **output?** | 블록 실행: 스냅샷 주입 → 실행 → 출력 선택 → §3.3 변환 |
 | `repl` | id, code | 콘솔 실행(공유 네임스페이스) |
 | `inspect` | id | 전역 변수 목록 |
 | `resetRuntime` | id, initScript | 워커 안 best-effort 리셋(사용자 전역 삭제 → 초기화 스크립트 재실행) |
@@ -89,6 +89,19 @@
 - 주입 안 된 참조를 실행 중 `xl()`이 만나면 `RuntimeError: xl(): 참조 '…'의 데이터가 준비되지 않았습니다` (안전망 — calc engine이 항상 선주입해야 한다).
 - `xl(ref, headers=False)` 입력 변환(§3.3): 열 전체 `'n'` 정수·빈 셀 없음 → `int64`, `'n'` 그 외 → `float64`+NaN, `'d'` → `datetime64[ns]`+NaT, `'b'` 빈 셀 없음 → `bool`, 그 외/혼합/빈 셀 포함 → `object`+None. `headers=True`면 첫 행이 컬럼명(빈 헤더는 `Unnamed: {j}`), `False`면 정수 컬럼 0..n-1. 경계 케이스 결정: `docs/domain/conversion-rules.md`.
 
+## 출력 선택 계약 (`run.output`, v1.1)
+
+`OutputSelection = { variable?, columns?, rowLimit? }` (`types/workbook.ts`). 필드가 없으면 **기존 동작 그대로**(마지막 표현식, 전체 열·행).
+워커는 `JSON.stringify(msg.output ?? null)`을 `_pygrid_output_sel`로 넣고 `_pygrid_run_convert(code, mode, includeIndex, output_sel)`을 호출한다 — PyProxy는 넘기지 않는다.
+
+| 필드 | 의미 | 경계 |
+|------|------|------|
+| `variable` | 마지막 표현식 대신 **그 이름의 전역 변수**를 결과로 쓴다. 본문은 끝까지 실행된다(마지막 표현식의 부작용 유지) | 없는 이름 → RunFailure `errorType:"NameError"`, message `출력 변수 '…'가 정의되지 않았습니다` (한국어 요약은 `errors-ko.ts`가 붙인다) |
+| `columns` | DataFrame 결과에서 **요청한 순서대로** 열만 남긴다. 열 이름은 `str()` 기준 비교 | 없는 열은 조용히 무시. 요청 열이 **하나도 없으면 전체 열 유지**(빈 spill 방지). DataFrame이 아니면 무시 |
+| `rowLimit` | DataFrame·Series·list/tuple·1D·2D ndarray에서 **상위 N 데이터 행**만 남긴다 | 헤더 행(DataFrame 열 이름·Series name)은 N에 포함되지 않는다. `N ≤ 0`은 무제한. 스칼라·dict·Figure·기타 객체는 무시 |
+
+적용 시점: **§3.3 변환 *전***(`convert.py`의 `_pygrid_select_output`). 따라서 값 모드 `cells`/`shape`와 객체 모드 `preview`/`shape`/`typeName`이 같은 선택을 반영한다.
+
 ## run 변환 결과 (§3.3 출력)
 
 - **값 모드**(`outputMode:'values'`): `cells: OutCell[][]` + `shape` + `kind`(1×1이면 `'scalar'` 아니면 `'table'`).
@@ -110,7 +123,7 @@
 ```ts
 getRuntimeClient(): RuntimeClient            // 앱 전역 싱글턴 (브라우저 전용)
 boot(opts?): Promise<void>                   // 멱등
-run(blockId, code, snapshots?, outputMode?, includeIndex?, timeoutSec?): Promise<RunPayload>
+run(blockId, code, snapshots?, outputMode?, includeIndex?, timeoutSec?, output?): Promise<RunPayload>
 repl(code, timeoutSec?): Promise<{ repr: string | null; traceback?: string }>
 analyze(code): Promise<string[]>             // 비리터럴 인수 → reject(Error(한국어 메시지))
 inspect(): Promise<VariableInfo[]>

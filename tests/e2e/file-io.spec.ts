@@ -86,7 +86,7 @@ test("샘플 워크북(생명표) → 전체 실행 → lx spill + 히스토그�
         page.evaluate(() => {
           const st = (window as any).__pygridStore.getState();
           const blockId = st.workbook.pyBlocks.find(
-            (b: any) => b.outputMode === "values",
+            (b: any) => b.kind !== "markdown" && b.outputMode === "values",
           )?.id;
           return Object.values(st.workbook.sheets[0].cells).filter(
             (c: any) => c.src === blockId,
@@ -106,7 +106,8 @@ test("샘플 워크북(생명표) → 전체 실행 → lx spill + 히스토그�
   const statuses = await page.evaluate(() =>
     (window as any).__pygridStore
       .getState()
-      .workbook.pyBlocks.map((b: any) => b.last?.status),
+      .workbook.pyBlocks.filter((b: any) => b.kind !== "markdown")
+      .map((b: any) => b.last?.status),
   );
   expect(statuses).toEqual(["ok", "ok"]);
 });

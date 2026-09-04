@@ -32,6 +32,9 @@ function sampleWorkbook(): Workbook {
       code: 'xl("A1")',
       outputMode: "object",
       includeIndex: "always",
+      title: "생명표 요약",
+      collapsed: true,
+      output: { variable: "df", columns: ["a", "b"], rowLimit: 5 },
       last: {
         status: "ok",
         kind: "image",
@@ -41,6 +44,18 @@ function sampleWorkbook(): Workbook {
         ranAt: "2026-09-03T00:00:00Z",
         imageBlobId: "blob-1",
       },
+    },
+    {
+      id: "blk2",
+      sheetId: wb.sheets[0].id,
+      anchor: { r: 0, c: 5 },
+      code: "",
+      outputMode: "values",
+      includeIndex: "auto",
+      kind: "markdown",
+      title: "분석 개요",
+      markdown: "# 분석 개요\n\n- 첫째\n- 둘째",
+      collapsed: false,
     },
   ];
   return wb;
@@ -53,6 +68,44 @@ describe("workbook-json", () => {
     const expected = structuredClone(wb);
     delete expected.pyBlocks[0].last!.imageBlobId; // 유일하게 허용되는 차이
     expect(restored).toEqual(expected);
+  });
+
+  it("v1.1 필드(kind·title·markdown·collapsed·output) 왕복 보존", () => {
+    const restored = parseWorkbookJson(serializeWorkbook(sampleWorkbook()));
+    expect(restored.version).toBe(1);
+    expect(restored.pyBlocks[0]).toMatchObject({
+      title: "생명표 요약",
+      collapsed: true,
+      output: { variable: "df", columns: ["a", "b"], rowLimit: 5 },
+    });
+    expect(restored.pyBlocks[1]).toMatchObject({
+      kind: "markdown",
+      markdown: "# 분석 개요\n\n- 첫째\n- 둘째",
+      title: "분석 개요",
+    });
+  });
+
+  it("v1.1 이전 파일(선택 필드 없음)도 그대로 열린다", () => {
+    const old = JSON.stringify({
+      version: 1,
+      id: "x",
+      title: "t",
+      sheets: [{ id: "s", name: "S", rowCount: 10, colCount: 5, cells: {} }],
+      pyBlocks: [
+        {
+          id: "b",
+          sheetId: "s",
+          anchor: { r: 0, c: 0 },
+          code: "1+1",
+          outputMode: "values",
+          includeIndex: "auto",
+        },
+      ],
+    });
+    const wb = parseWorkbookJson(old);
+    expect(wb.pyBlocks[0].kind).toBeUndefined(); // 기본 = 코드 블록
+    expect(wb.pyBlocks[0].output).toBeUndefined();
+    expect(wb.pyBlocks[0].collapsed).toBeUndefined();
   });
 
   it("손상 파일 거부 (한국어 메시지)", () => {

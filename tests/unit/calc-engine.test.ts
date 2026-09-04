@@ -14,7 +14,7 @@ import {
   type WorkbookView,
 } from "@/lib/runtime/calc-engine";
 import type { RunPayload } from "@/lib/runtime/protocol";
-import type { CellRange } from "@/types/workbook";
+import type { CellRange, OutputSelection } from "@/types/workbook";
 
 const blk = (
   id: string,
@@ -233,7 +233,11 @@ function makeHost(cells: Record<string, { v: number; t: "n" }> = {}) {
 
 function makeClient() {
   const analyzeCalls: string[] = [];
-  const runCalls: { blockId: string; snapshots: Record<string, unknown> }[] = [];
+  const runCalls: {
+    blockId: string;
+    snapshots: Record<string, unknown>;
+    output?: OutputSelection;
+  }[] = [];
   const ok: RunPayload = {
     ok: true,
     kind: "table",
@@ -248,8 +252,16 @@ function makeClient() {
       if (code.includes("BAD")) throw new Error("xl() 인수는 문자열 리터럴이어야 합니다");
       return [...code.matchAll(/xl\("([^"]+)"/g)].map((m) => m[1]);
     },
-    async run(blockId: string, _code: string, snapshots: Record<string, unknown>) {
-      runCalls.push({ blockId, snapshots });
+    async run(
+      blockId: string,
+      _code: string,
+      snapshots: Record<string, unknown>,
+      _outputMode?: string,
+      _includeIndex?: string,
+      _timeoutSec?: number,
+      output?: OutputSelection,
+    ) {
+      runCalls.push({ blockId, snapshots, output });
       return ok;
     },
   };
@@ -361,6 +373,20 @@ describe("RunCoordinator", () => {
     expect(runCalls.map((r) => r.blockId)).toEqual(["A", "B"]); // C 제외
   });
 
+  test("block.output이 client.run으로 그대로 전달된다", async () => {
+    const { client, runCalls } = makeClient();
+    const { host } = makeHost();
+    const co = new RunCoordinator(client, host);
+    const output = { variable: "df", columns: ["a"], rowLimit: 5 };
+    const view: WorkbookView = {
+      blocks: [blk("A", { r: 0, c: 0 }, "1", { output })],
+      sheetOrder: ["s1"],
+      spills: new Map(),
+    };
+    await co.runAll(view);
+    expect(runCalls[0].output).toEqual(output);
+  });
+
   describe("자동 모드 디바운스", () => {
     beforeEach(() => vi.useFakeTimers());
     afterEach(() => vi.useRealTimers());
@@ -388,5 +414,91 @@ describe("RunCoordinator", () => {
       await co.whenIdle();
       expect(runCalls).toHaveLength(1); // 수동: 실행 없음
     });
+  });
+});
+
+// ── 마크다운 블록(v1.1): 실행 대상 아님 ────────────────────
+
+describe("마크다운 블록 제외", () => {
+  const mdView = (): WorkbookView => ({
+    blocks: [
+      blk("M", { r: 0, c: 0 }, "## 요약 xl(A1)", { kind: "markdown" }),
+      blk("A", { r: 5, c: 0 }, 'xl("A1")'),
+    ],
+    sheetOrder: ["s1"],
+    spills: new Map([
+      ["M", range(0, 0, 0, 0)],
+      ["A", range(5, 0, 5, 0)],
+    ]),
+  });
+
+  test("buildGraph: 노드도 의존 대상도 아니다", () => {
+    const v = mdView();
+    const resolved = new Map([
+      ["M", [sr(5, 0, 5, 0)]], // M→A 참조(무시돼야 함)
+      ["A", [sr(0, 0, 0, 0)]], // A→M 앵커 참조(의존 아님)
+    ]);
+    const g = buildGraph(v.blocks, resolved, v.spills);
+    expect(g.deps.has("M")).toBe(false);
+    expect(g.dependents.has("M")).toBe(false);
+    expect(g.deps.get("A")!.size).toBe(0);
+  });
+
+  test("calcOrder: order·cycle 어디에도 없다 (상호 참조여도 순환 아님)", () => {
+    const v = mdView();
+    const resolved = new Map([
+      ["M", [sr(5, 0, 5, 0)]],
+      ["A", [sr(0, 0, 0, 0)]],
+    ]);
+    const g = buildGraph(v.blocks, resolved, v.spills);
+    const { order, cycle } = calcOrder(v.blocks, ["s1"], g);
+    expect(order).toEqual(["A"]);
+    expect(cycle).toEqual([]);
+  });
+
+  test("dirtyPropagation: 마크다운 편집·참조 겹침 모두 dirty 아님", () => {
+    const v = mdView();
+    const resolved = new Map([
+      ["M", [sr(0, 3, 0, 3)]],
+      ["A", [sr(0, 3, 0, 3)]],
+    ]);
+    const g = buildGraph(v.blocks, resolved, v.spills);
+    expect(dirtyPropagation(resolved, g, [], ["M"])).toEqual(new Set());
+    expect(dirtyPropagation(resolved, g, [sr(0, 3, 0, 3)], [])).toEqual(new Set(["A"]));
+  });
+
+  test("runAll: analyze·run·onBusy·onResult 모두 없음", async () => {
+    const { client, analyzeCalls, runCalls } = makeClient();
+    const { host, events } = makeHost();
+    const co = new RunCoordinator(client, host);
+    const view: WorkbookView = {
+      blocks: [
+        blk("M", { r: 0, c: 0 }, "## 요약 xl(A1)", { kind: "markdown" }),
+        blk("A", { r: 5, c: 0 }, "1"),
+      ],
+      sheetOrder: ["s1"],
+      spills: new Map(),
+    };
+    await co.runAll(view);
+    expect(runCalls.map((r) => r.blockId)).toEqual(["A"]);
+    expect(analyzeCalls).toEqual(["1"]); // 마크다운 본문은 워커로 가지 않는다
+    expect(events.map((e) => e.id)).not.toContain("M");
+  });
+
+  test("runBlocks(마크다운 시드) → 아무것도 실행되지 않는다", async () => {
+    const { client, runCalls } = makeClient();
+    const { host, events } = makeHost();
+    const co = new RunCoordinator(client, host);
+    const view: WorkbookView = {
+      blocks: [
+        blk("M", { r: 0, c: 0 }, "", { kind: "markdown" }),
+        blk("A", { r: 5, c: 0 }, "1"),
+      ],
+      sheetOrder: ["s1"],
+      spills: new Map(),
+    };
+    await co.runBlocks(["M"], view);
+    expect(runCalls).toEqual([]);
+    expect(events).toEqual([]);
   });
 });

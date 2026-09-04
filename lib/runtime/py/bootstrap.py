@@ -39,10 +39,12 @@ def _pygrid_mpl_setup():
         pass  # 폰트 실패는 실행을 막지 않는다(차트 한글이 □로 보일 뿐)
 
 
-def _pygrid_exec_capture(code):
+def _pygrid_exec_capture(code, variable=None):
     """코드 본문을 exec하고 마지막 문장이 표현식이면 eval해 그 값을 돌려준다.
 
     _pygrid_run(REPL, repr)과 convert.py의 _pygrid_run_convert(블록 실행)가 공유한다.
+    variable(출력 선택)을 주면 마지막 표현식 대신 그 이름의 **전역 변수** 값을 돌려준다.
+    본문은 항상 끝까지 실행한다(마지막 표현식의 부작용 유지). 없는 이름이면 NameError.
     """
     import ast
 
@@ -52,9 +54,14 @@ def _pygrid_exec_capture(code):
     if tree.body and isinstance(tree.body[-1], ast.Expr):
         last = tree.body.pop()
     exec(compile(tree, "<pygrid>", "exec"), g)
-    if last is None:
-        return None
-    return eval(compile(ast.Expression(last.value), "<pygrid>", "eval"), g)
+    value = None
+    if last is not None:
+        value = eval(compile(ast.Expression(last.value), "<pygrid>", "eval"), g)
+    if variable:
+        if variable not in g:
+            raise NameError(f"출력 변수 '{variable}'가 정의되지 않았습니다")
+        return g[variable]
+    return value
 
 
 def _pygrid_format_exc(e):

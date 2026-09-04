@@ -229,8 +229,10 @@ async function handleRun(msg: Extract<MainToWorker, { t: "run" }>): Promise<void
     py.globals.set("_pygrid_code", msg.code);
     py.globals.set("_pygrid_output_mode", msg.outputMode);
     py.globals.set("_pygrid_include_index", msg.includeIndex);
+    // 출력 선택은 JSON 문자열로 넘긴다(PyProxy 금지). 없으면 "null" → Python None
+    py.globals.set("_pygrid_output_sel", JSON.stringify(msg.output ?? null));
     const raw: string = await py.runPythonAsync(
-      "_pygrid_run_convert(_pygrid_code, _pygrid_output_mode, _pygrid_include_index)",
+      "_pygrid_run_convert(_pygrid_code, _pygrid_output_mode, _pygrid_include_index, _pygrid_output_sel)",
     );
     const r = JSON.parse(raw) as PyConvertResult;
     const durationMs = Math.round(performance.now() - t0);

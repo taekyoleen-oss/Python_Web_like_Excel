@@ -830,6 +830,20 @@
  ],
  "pyBlocks": [
   {
+   "id": "blk-life-intro",
+   "sheetId": "sh-life-data",
+   "anchor": {
+    "r": 0,
+    "c": 6
+   },
+   "code": "",
+   "outputMode": "values",
+   "includeIndex": "auto",
+   "kind": "markdown",
+   "title": "생명표 분석",
+   "markdown": "# 생명표 분석\n\n연령별 사망률 `qx`에서 생존자 수 `lx`, 사망자 수 `dx`, 평균여명 `ex`를 계산합니다.\n\n## 구성\n\n- **D열**: `lx`·`dx`·`ex` 계산 결과\n- **I2**: `dx` 분포 히스토그램\n\n블록 카드의 **출력** 행에서 표시할 변수·열·행 수를 코드 수정 없이 바꿀 수 있습니다.\n"
+  },
+  {
    "id": "blk-life-lx",
    "sheetId": "sh-life-data",
    "anchor": {
@@ -838,6 +852,7 @@
    },
    "outputMode": "values",
    "includeIndex": "auto",
+   "title": "생존자 수 계산",
    "code": "df = xl(\"A1:B102\", headers=True)\nlx = [100000.0]\nfor q in df[\"qx\"][:-1]:\n    lx.append(lx[-1] * (1 - q))\ndf[\"lx\"] = lx\ndf[\"dx\"] = df[\"lx\"] * df[\"qx\"]\n# 평균여명 근사: ex ≈ (x 이후 lx 합) / lx − 0.5\nrev = df[\"lx\"][::-1].cumsum()[::-1]\ndf[\"ex\"] = rev / df[\"lx\"] - 0.5\ndf[[\"lx\", \"dx\", \"ex\"]].round(2)"
   },
   {
@@ -849,6 +864,7 @@
    },
    "outputMode": "object",
    "includeIndex": "auto",
+   "title": "사망자 수 분포",
    "code": "import matplotlib.pyplot as plt\ndf = xl(\"A1:B102\", headers=True)\nlx = [100000.0]\nfor q in df[\"qx\"][:-1]:\n    lx.append(lx[-1] * (1 - q))\ndx = [l * q for l, q in zip(lx, df[\"qx\"])]\nfig, ax = plt.subplots(figsize=(7, 4))\nax.bar(df[\"x\"], dx, color=\"#4A90C2\")\nax.set_title(\"사망자 수 분포 (dx)\")\nax.set_xlabel(\"연령\")\nfig"
   }
  ],

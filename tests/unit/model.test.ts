@@ -176,3 +176,111 @@ describe("워크북 스토어", () => {
     expect(store.getState().workbook.sheets[0].cells).toEqual({});
   });
 });
+
+describe("블록 앵커 재지정·접기·출력 선택", () => {
+  /** D1 앵커 + 3행 spill(D1:D3)이 기록된 블록 */
+  const seed = () => {
+    const { store, sheetId } = fresh();
+    const id = store.getState().addPyBlock(sheetId, { r: 0, c: 3 })!;
+    store.getState().applyBlockResult(
+      id,
+      [[{ v: 1, t: "n" }], [{ v: 2, t: "n" }], [{ v: 3, t: "n" }]],
+      {
+        last: {
+          status: "ok",
+          stdout: "",
+          stderr: "",
+          durationMs: 1,
+          ranAt: "",
+          spillRange: { r0: 0, c0: 3, r1: 2, c1: 3 },
+        },
+        clearPrevious: true,
+      },
+    );
+    return { store, sheetId, id };
+  };
+
+  it("앵커 이동: 이전 spill 제거 + 새 앵커 + dirty, undo 한 단계", async () => {
+    const { store, id } = seed();
+    await sleep(350);
+    expect(Object.keys(cells(store))).toHaveLength(3);
+    const depth = store.temporal.getState().pastStates.length;
+
+    expect(store.getState().setBlockAnchor(id, { r: 5, c: 5 })).toBeNull();
+    expect(Object.keys(cells(store))).toHaveLength(0); // 옛 spill 제거
+    const block = store.getState().workbook.pyBlocks[0];
+    expect(block.anchor).toEqual({ r: 5, c: 5 });
+    expect(block.last?.spillRange).toBeUndefined();
+    expect(store.getState().dirtyBlocks[id]).toBe(true);
+
+    await sleep(350);
+    expect(store.temporal.getState().pastStates.length).toBe(depth + 1); // 한 트랜잭션
+    store.temporal.getState().undo();
+    expect(store.getState().workbook.pyBlocks[0].anchor).toEqual({ r: 0, c: 3 });
+    expect(Object.keys(cells(store))).toHaveLength(3);
+  });
+
+  it("충돌 거부: 다른 블록 앵커·다른 블록 결과·비어 있지 않은 셀", () => {
+    const { store, sheetId, id } = seed();
+    const other = store.getState().addPyBlock(sheetId, { r: 9, c: 9 })!;
+    store.getState().applyBlockResult(other, [[{ v: 7, t: "n" }], [{ v: 8, t: "n" }]], {
+      clearPrevious: true,
+    });
+    store.getState().setCellValue(sheetId, 7, 7, { v: "데이터", t: "s" });
+
+    expect(store.getState().setBlockAnchor(id, { r: 9, c: 9 })).toMatch(/블록/);
+    expect(store.getState().setBlockAnchor(id, { r: 10, c: 9 })).toMatch(/결과/);
+    expect(store.getState().setBlockAnchor(id, { r: 7, c: 7 })).toMatch(/비어 있지 않은/);
+    // 거부되면 아무것도 바뀌지 않는다
+    expect(store.getState().workbook.pyBlocks[0].anchor).toEqual({ r: 0, c: 3 });
+    expect(cells(store)["0:3"]?.v).toBe(1);
+    expect(cells(store)["7:7"]?.v).toBe("데이터");
+  });
+
+  it("접기 상태는 저장되지만 undo 이력을 만들지 않는다", async () => {
+    const { store, sheetId } = fresh();
+    const id = store.getState().addPyBlock(sheetId, { r: 0, c: 0 })!;
+    await sleep(350);
+    const depth = store.temporal.getState().pastStates.length;
+
+    store.getState().setBlockCollapsed(id, true);
+    await sleep(350);
+    expect(store.getState().workbook.pyBlocks[0].collapsed).toBe(true);
+    expect(store.temporal.getState().pastStates.length).toBe(depth);
+
+    store.getState().setAllCollapsed(false);
+    await sleep(350);
+    expect(store.getState().workbook.pyBlocks[0].collapsed).toBeUndefined();
+    expect(store.temporal.getState().pastStates.length).toBe(depth);
+
+    // 실제 편집은 계속 이력에 남는다
+    store.getState().setBlockCode(id, "1+1");
+    await sleep(350);
+    expect(store.temporal.getState().pastStates.length).toBe(depth + 1);
+  });
+
+  it("마크다운 블록: 셀을 쓰지 않고 첫 헤딩이 제목이 된다", () => {
+    const { store, sheetId } = fresh();
+    const id = store.getState().addPyBlock(sheetId, { r: 2, c: 2 }, "markdown")!;
+    store.getState().setBlockMarkdown(id, "# 분석 개요\n본문");
+    const block = store.getState().workbook.pyBlocks[0];
+    expect(block.kind).toBe("markdown");
+    expect(block.title).toBe("분석 개요");
+    expect(Object.keys(cells(store))).toHaveLength(0);
+  });
+
+  it("setBlockOutput: 병합하고 undefined는 해제", () => {
+    const { store, sheetId } = fresh();
+    const id = store.getState().addPyBlock(sheetId, { r: 0, c: 0 })!;
+    const out = () => store.getState().workbook.pyBlocks[0].output;
+
+    store.getState().setBlockOutput(id, { variable: "df" });
+    expect(out()).toEqual({ variable: "df" });
+    store.getState().setBlockOutput(id, { rowLimit: 3, columns: ["a"] });
+    expect(out()).toEqual({ variable: "df", rowLimit: 3, columns: ["a"] });
+    store.getState().setBlockOutput(id, { variable: undefined, columns: undefined });
+    expect(out()).toEqual({ rowLimit: 3 });
+    store.getState().setBlockOutput(id, { rowLimit: undefined });
+    expect(out()).toBeUndefined();
+  });
+});

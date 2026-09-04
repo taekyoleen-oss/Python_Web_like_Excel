@@ -53,6 +53,19 @@ export interface RunResult {
   ranAt: string;
 }
 
+/** 블록 종류 — 마크다운 블록은 실행되지 않고 문서·목차 용도로만 쓰인다 */
+export type BlockKind = "code" | "markdown";
+
+/** 실행 결과 중 무엇을 셀에 표시할지 (설계서 확장 §7.1) */
+export interface OutputSelection {
+  /** 출력할 전역 변수명. 없으면 마지막 표현식 값 */
+  variable?: string;
+  /** DataFrame 결과에서 표시할 열. 없으면 전체 열 */
+  columns?: string[];
+  /** 표시할 상위 행 수. 없으면 전체 행 */
+  rowLimit?: number;
+}
+
 export interface PyBlock {
   id: string;
   sheetId: string;
@@ -62,6 +75,16 @@ export interface PyBlock {
   /** DataFrame spill 시 index 포함 규칙 */
   includeIndex: IncludeIndex;
   last?: RunResult;
+  /** 기본 'code'. 'markdown'이면 code/outputMode는 무시된다 */
+  kind?: BlockKind;
+  /** 목차에 표시되는 제목 (마크다운 블록은 본문 첫 헤딩에서 자동 추출 가능) */
+  title?: string;
+  /** kind==='markdown'일 때의 본문 */
+  markdown?: string;
+  /** 카드 접기 상태 (마크다운·코드·결과 전부 숨김) */
+  collapsed?: boolean;
+  /** 출력 선택 (변수·열·행) */
+  output?: OutputSelection;
 }
 
 export type CalcMode = "auto" | "manual";

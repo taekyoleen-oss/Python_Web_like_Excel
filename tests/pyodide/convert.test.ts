@@ -9,7 +9,7 @@ import { loadPyodide, type PyodideInterface } from "pyodide";
 import { afterAll, beforeAll, expect, test } from "vitest";
 
 import type { RangeSnapshot } from "@/lib/runtime/protocol";
-import type { CellType } from "@/types/workbook";
+import type { CellType, OutputSelection } from "@/types/workbook";
 
 let py: PyodideInterface;
 const results: { row: string; pass: boolean }[] = [];
@@ -56,13 +56,16 @@ const runConvert = (
   code: string,
   mode: "values" | "object" = "values",
   idx: "auto" | "always" | "never" = "auto",
+  output: OutputSelection | null = null,
 ): ConvertResult => {
   py.globals.set("_pygrid_code", code);
   py.globals.set("_pygrid_output_mode", mode);
   py.globals.set("_pygrid_include_index", idx);
+  // 워커와 같은 호출 형태 — 출력 선택은 JSON 문자열로 넘긴다
+  py.globals.set("_pygrid_output_sel", JSON.stringify(output));
   return JSON.parse(
     py.runPython(
-      "_pygrid_run_convert(_pygrid_code, _pygrid_output_mode, _pygrid_include_index)",
+      "_pygrid_run_convert(_pygrid_code, _pygrid_output_mode, _pygrid_include_index, _pygrid_output_sel)",
     ) as string,
   ) as ConvertResult;
 };
@@ -383,4 +386,100 @@ row("객체 모드 DataFrame → table preview 상위 100행 + dtypes + NaN null
   expect(r.preview?.dtypes).toEqual(["float64", "float64"]);
   expect(r.preview?.rows).toHaveLength(100);
   expect(r.preview?.rows?.[0]).toEqual([0, null]);
+});
+
+// ── 출력 선택(v1.1): variable · columns · rowLimit ────────
+
+row("출력 선택 variable — 지정 전역 변수 (없으면 NameError, #15)", () => {
+  const code = [
+    "import pandas as pd",
+    'sel_df = pd.DataFrame({"a": [1, 2]})',
+    "sel_last = 99",
+    "sel_last",
+  ].join("\n");
+  expect(runConvert(code).cells).toEqual([[{ v: 99, t: "n" }]]); // 선택 없으면 마지막 표현식
+  const picked = runConvert(code, "values", "auto", { variable: "sel_df" });
+  expect(picked.cells).toEqual([
+    [{ v: "a", t: "s" }],
+    [{ v: 1, t: "n" }],
+    [{ v: 2, t: "n" }],
+  ]);
+  const miss = runConvert(code, "values", "auto", { variable: "없는변수" });
+  expect(miss.ok).toBe(false);
+  expect(miss.etype).toBe("NameError"); // errors-ko가 한국어 요약을 붙인다
+  expect(miss.msg).toContain("없는변수");
+});
+
+row("출력 선택 columns — 요청 순서 부분집합, 없는 열 무시, 전부 없으면 전체 (#16)", () => {
+  const code = 'import pandas as pd\npd.DataFrame({"a": [1, 2], "b": [3, 4], "c": [5, 6]})';
+  const sub = runConvert(code, "values", "auto", { columns: ["c", "a"] });
+  expect(sub.cells?.[0]).toEqual([
+    { v: "c", t: "s" },
+    { v: "a", t: "s" },
+  ]); // 요청 순서 그대로
+  expect(sub.cells?.[1]).toEqual([
+    { v: 5, t: "n" },
+    { v: 1, t: "n" },
+  ]);
+  const partial = runConvert(code, "values", "auto", { columns: ["b", "없는열"] });
+  expect(partial.cells?.[0]).toEqual([{ v: "b", t: "s" }]); // 없는 열은 조용히 무시
+  const allUnknown = runConvert(code, "values", "auto", { columns: ["x", "y"] });
+  expect(allUnknown.cells?.[0]).toEqual([
+    { v: "a", t: "s" },
+    { v: "b", t: "s" },
+    { v: "c", t: "s" },
+  ]); // 전부 없으면 전체 열 — 빈 spill 방지
+  // 비 DataFrame은 columns를 무시한다
+  expect(runConvert("[1, 2]", "values", "auto", { columns: ["a"] }).shape).toEqual([2, 1]);
+});
+
+row("출력 선택 rowLimit — 상위 N 데이터 행(헤더 제외), 0 이하는 무제한 (#17)", () => {
+  const df = 'import pandas as pd\npd.DataFrame({"a": [1, 2, 3, 4], "b": [5, 6, 7, 8]})';
+  const r = runConvert(df, "values", "auto", { rowLimit: 2 });
+  expect(r.shape).toEqual([3, 2]); // 헤더 1행 + 데이터 2행
+  expect(r.cells?.[0]).toEqual([
+    { v: "a", t: "s" },
+    { v: "b", t: "s" },
+  ]);
+  expect(r.cells?.[2]?.[0]).toEqual({ v: 2, t: "n" });
+  // Series name 헤더도 데이터 행에 포함되지 않는다
+  expect(
+    runConvert('import pandas as pd\npd.Series([1, 2, 3], name="점수")', "values", "auto", {
+      rowLimit: 2,
+    }).cells,
+  ).toEqual([[{ v: "점수", t: "s" }], [{ v: 1, t: "n" }], [{ v: 2, t: "n" }]]);
+  // 평범한 list · 2D ndarray
+  expect(runConvert("[1, 2, 3, 4, 5]", "values", "auto", { rowLimit: 2 }).cells).toEqual([
+    [{ v: 1, t: "n" }],
+    [{ v: 2, t: "n" }],
+  ]);
+  expect(
+    runConvert("import numpy as np\nnp.arange(9).reshape(3, 3)", "values", "auto", {
+      rowLimit: 1,
+    }).shape,
+  ).toEqual([1, 3]);
+  expect(runConvert(df, "values", "auto", { rowLimit: 0 }).shape).toEqual([5, 2]); // 0 → 무제한
+  expect(runConvert("42", "values", "auto", { rowLimit: 1 }).cells).toEqual([
+    [{ v: 42, t: "n" }],
+  ]); // 스칼라는 무시
+});
+
+row("출력 선택 — 객체 모드 preview·shape에도 같은 선택 반영 (#18)", () => {
+  const code = [
+    "import pandas as pd",
+    'sel_obj = pd.DataFrame({"a": range(10), "b": range(10), "c": range(10)})',
+    "None",
+  ].join("\n");
+  const r = runConvert(code, "object", "auto", {
+    variable: "sel_obj",
+    columns: ["b", "a"],
+    rowLimit: 3,
+  });
+  expect(r.ok).toBe(true);
+  expect(r.kind).toBe("table");
+  expect(r.typeName).toBe("DataFrame");
+  expect(r.shape).toEqual([3, 2]);
+  expect(r.preview?.columns).toEqual(["b", "a"]);
+  expect(r.preview?.shape).toEqual([3, 2]);
+  expect(r.preview?.rows).toHaveLength(3);
 });

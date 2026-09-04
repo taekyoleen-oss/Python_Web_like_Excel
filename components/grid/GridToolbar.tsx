@@ -5,6 +5,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import {
+  Article,
   ClipboardText,
   Play,
   Plus,
@@ -34,7 +35,11 @@ import { setCalcModeEverywhere } from "@/lib/grid/calc-host";
 import type { DateOrder } from "@/lib/grid/clipboard/infer";
 import { parseClipboard } from "@/lib/grid/clipboard/parse";
 import { useWorkbookStore, type CellEdit } from "@/lib/grid/model";
-import { addBlockAtSelection, runAllBlocks } from "@/lib/grid/run-block";
+import {
+  addBlockAtSelection,
+  addMarkdownAtSelection,
+  runAllBlocks,
+} from "@/lib/grid/run-block";
 import { getRuntimeClient } from "@/lib/runtime/client";
 import type { CalcMode } from "@/types/workbook";
 import {
@@ -307,6 +312,9 @@ export default function GridToolbar() {
 
       <ToolButton label="Python 블록 추가 (Ctrl+Shift+P)" onClick={addBlockAtSelection}>
         <Plus className="text-primary" />
+      </ToolButton>
+      <ToolButton label="마크다운 블록 추가" onClick={addMarkdownAtSelection}>
+        <Article />
       </ToolButton>
       {/* 실행 버튼은 --primary 채움 (§4.6 Button) */}
       <Tooltip>

@@ -63,12 +63,36 @@ def build_life_table():
         qx = min(0.9999, 0.0005 + 0.00008 * math.exp(0.09 * x))
         rows.append([cell(x, "n"), cell(round(qx, 6), "n")])
 
+    # 마크다운 블록: 실행되지 않으며 앵커 셀에 값을 쓰지 않는다 (설계서 부록 C)
+    intro_block = {
+        "id": "blk-life-intro",
+        "sheetId": "sh-life-data",
+        "anchor": {"r": 0, "c": 6},  # G1
+        "code": "",
+        "outputMode": "values",
+        "includeIndex": "auto",
+        "kind": "markdown",
+        "title": "생명표 분석",
+        "markdown": """# 생명표 분석
+
+연령별 사망률 `qx`에서 생존자 수 `lx`, 사망자 수 `dx`, 평균여명 `ex`를 계산합니다.
+
+## 구성
+
+- **D열**: `lx`·`dx`·`ex` 계산 결과
+- **I2**: `dx` 분포 히스토그램
+
+블록 카드의 **출력** 행에서 표시할 변수·열·행 수를 코드 수정 없이 바꿀 수 있습니다.
+""",
+    }
+
     lx_block = {
         "id": "blk-life-lx",
         "sheetId": "sh-life-data",
         "anchor": {"r": 0, "c": 3},  # D1
         "outputMode": "values",
         "includeIndex": "auto",
+        "title": "생존자 수 계산",
         "code": (
             'df = xl("A1:B102", headers=True)\n'
             "lx = [100000.0]\n"
@@ -88,6 +112,7 @@ def build_life_table():
         "anchor": {"r": 1, "c": 8},  # I2
         "outputMode": "object",
         "includeIndex": "auto",
+        "title": "사망자 수 분포",
         "code": (
             "import matplotlib.pyplot as plt\n"
             'df = xl("A1:B102", headers=True)\n'
@@ -106,7 +131,7 @@ def build_life_table():
         "wb-sample-life-table",
         "생명표 예제",
         [sheet_from_rows("sh-life-data", "데이터", rows)],
-        [lx_block, hist_block],
+        [intro_block, lx_block, hist_block],
     )
 
 
@@ -134,6 +159,7 @@ def build_loss_ratio():
         "anchor": {"r": 1, "c": 5},  # F2
         "outputMode": "values",
         "includeIndex": "auto",
+        "title": "상품별 손해율",
         "code": (
             'df = xl("A1:D41", headers=True)\n'
             'g = df.groupby("상품").agg(\n'

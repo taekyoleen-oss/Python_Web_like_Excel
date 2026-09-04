@@ -11,7 +11,10 @@ calcOrder(blocks, sheetOrder, graph): { order, cycle }      // Kahn, 동순위 (
 dirtyPropagation(resolved, graph, editedRanges, editedBlockIds): Set<blockId>
 ```
 
-- `WorkbookView` = `{ blocks: CalcBlock[], sheetOrder: string[], spills: Map<id, CellRange|undefined> }` — 호출 시점 스토어 상태의 평면 사본. `CalcBlock` = PyBlock의 `{id, sheetId, anchor, code, outputMode, includeIndex}` 부분집합.
+- `WorkbookView` = `{ blocks: CalcBlock[], sheetOrder: string[], spills: Map<id, CellRange|undefined> }` — 호출 시점 스토어 상태의 평면 사본. `CalcBlock` = PyBlock의 `{id, sheetId, anchor, code, outputMode, includeIndex, output?, kind?}` 부분집합.
+- **마크다운 블록 제외(v1.1)**: `kind === "markdown"`인 블록은 실행 대상이 아니다(`isExecutable(b)`). `buildGraph`가 노드에서 빼므로 **의존 대상도 되지 못하고**(다른 블록이 그 앵커를 참조해도 의존이 생기지 않음), `calcOrder`의 `order`·`cycle`, `dirtyPropagation`의 결과, `runAll`/`runBlocks`/`notifyEdit` 큐에도 들어가지 않는다. `analyze`·`run` 메시지가 워커로 나가지 않고 `onBusy`/`onResult`도 호출되지 않는다. → grid-ui는 마크다운 카드에 실행 배지·`#BUSY!`·오류 셀을 표시하지 않는다.
+  - `dirtyPropagation`은 `graph.deps`에 없는 id(마크다운 등)를 `editedBlockIds`·`resolved` 양쪽에서 걸러낸다 — 마크다운 본문을 편집해도 dirty 배지가 생기지 않는다.
+- **출력 선택 전달(v1.1)**: `block.output`(`OutputSelection`)은 `client.run(..., timeoutSec, output)`의 마지막 인자로 그대로 넘어간다. 의미론은 `output/runtime-protocol.md` "출력 선택 계약".
 - 값 모드 블록에 기록된 spill이 없으면(첫 실행 전 등) **앵커 1×1**이 의존 대상이 된다.
 - **순환**: 순환에 속한 블록 전부 `cycle`, `order`에서 제외. 순환의 *하위*(순환을 참조하지만 스스로는 순환이 아닌) 블록은 순환 의존을 무시하고 `order`에 남는다 — 실행 시 이전 spill 값 또는 xl() 안전망(RuntimeError)으로 진행.
 - **변수 공유 한계**(§2.4): `xl()` 없이 변수로만 이어진 블록은 의존성으로 추적되지 않는다. 순서 보장은 `runAll`(전 블록 calcOrder)에서만 — UI 안내 문구 필요.

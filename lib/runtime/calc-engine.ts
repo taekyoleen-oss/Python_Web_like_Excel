@@ -3,7 +3,15 @@
 // API 문서: /output/calc-engine-api.md
 
 import { parseA1 } from "@/lib/grid/a1";
-import type { Cell, CellRange, CellType, IncludeIndex, OutputMode } from "@/types/workbook";
+import type {
+  BlockKind,
+  Cell,
+  CellRange,
+  CellType,
+  IncludeIndex,
+  OutputMode,
+  OutputSelection,
+} from "@/types/workbook";
 import { spillRange, toCells } from "./converters";
 import type { RangeSnapshot, RunPayload } from "./protocol";
 
@@ -16,6 +24,10 @@ export interface CalcBlock {
   code: string;
   outputMode: OutputMode;
   includeIndex: IncludeIndex;
+  /** 출력 선택(변수·열·행). 워커 run 메시지로 그대로 전달된다 */
+  output?: OutputSelection;
+  /** 'markdown' 블록은 실행 대상이 아니다 — 큐·그래프에서 제외 */
+  kind?: BlockKind;
 }
 
 export interface SheetRange extends CellRange {
@@ -37,6 +49,9 @@ export interface WorkbookView {
   /** 값 모드 블록의 현재 spill 범위. 없으면 앵커 1×1로 간주 */
   spills: Map<string, CellRange | undefined>;
 }
+
+/** 마크다운 블록은 실행 대상이 아니다 — 그래프·순서·dirty·실행 큐 전부에서 제외한다 */
+export const isExecutable = (b: CalcBlock): boolean => b.kind !== "markdown";
 
 export const overlaps = (a: SheetRange, b: SheetRange): boolean =>
   a.sheetId === b.sheetId && a.r0 <= b.r1 && b.r0 <= a.r1 && a.c0 <= b.c1 && b.c0 <= a.c1;
@@ -65,10 +80,11 @@ export function resolveRefs(
 
 /** B의 참조가 A의 spill 범위(값 모드) 또는 앵커 셀(객체 모드)과 겹치면 B는 A에 의존 (§2.4) */
 export function buildGraph(
-  blocks: CalcBlock[],
+  all: CalcBlock[],
   resolved: Map<string, SheetRange[]>,
   spills: Map<string, CellRange | undefined>,
 ): CalcGraph {
+  const blocks = all.filter(isExecutable); // 마크다운은 노드가 아니다(참조 대상도 아님)
   const target = (b: CalcBlock): SheetRange => {
     const spill = b.outputMode === "values" ? spills.get(b.id) : undefined;
     const r = spill ?? { r0: b.anchor.r, c0: b.anchor.c, r1: b.anchor.r, c1: b.anchor.c };
@@ -146,10 +162,11 @@ function cycleMembers(blocks: CalcBlock[], graph: CalcGraph): Set<string> {
  *  순환의 하위(순환에 의존하지만 순환은 아닌) 블록은 순환 의존을 무시하고 order에 포함된다
  *  — 실행 시 xl() 안전망 또는 이전 spill 값으로 진행된다(문서 참조) */
 export function calcOrder(
-  blocks: CalcBlock[],
+  all: CalcBlock[],
   sheetOrder: string[],
   graph: CalcGraph,
 ): { order: string[]; cycle: string[] } {
+  const blocks = all.filter(isExecutable);
   const cmp = makeCmp(blocks, sheetOrder);
   const cycle = cycleMembers(blocks, graph);
   const aliveIds = blocks.map((b) => b.id).filter((id) => !cycle.has(id));
@@ -185,8 +202,11 @@ export function dirtyPropagation(
   editedRanges: SheetRange[],
   editedBlockIds: string[],
 ): Set<string> {
-  const dirty = new Set(editedBlockIds);
+  // graph에 없는 id = 실행 대상 아님(마크다운 블록 등) → dirty 배지에서도 제외
+  const known = (id: string): boolean => graph.deps.has(id);
+  const dirty = new Set(editedBlockIds.filter(known));
   for (const [id, refs] of resolved) {
+    if (!known(id)) continue;
     if (refs.some((ref) => editedRanges.some((e) => overlaps(ref, e)))) dirty.add(id);
   }
   const stack = [...dirty];
@@ -235,6 +255,7 @@ export interface RuntimeLike {
     outputMode: OutputMode,
     includeIndex: IncludeIndex,
     timeoutSec?: number,
+    output?: OutputSelection,
   ): Promise<RunPayload>;
 }
 
@@ -347,6 +368,7 @@ export class RunCoordinator {
   ): Promise<{ resolved: Map<string, SheetRange[]>; graph: CalcGraph }> {
     const resolved = new Map<string, SheetRange[]>();
     for (const b of view.blocks) {
+      if (!isExecutable(b)) continue; // 마크다운 코드는 워커로 보내지 않는다
       try {
         resolved.set(
           b.id,
@@ -419,6 +441,7 @@ export class RunCoordinator {
           block.outputMode,
           block.includeIndex,
           this.timeoutSec,
+          block.output,
         );
       } catch (e) {
         // 타임아웃 → interrupt → 재부트로 요청이 거부된 경우 등

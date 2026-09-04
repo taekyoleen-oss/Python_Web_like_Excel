@@ -29,6 +29,7 @@ import { colToLetter, formatA1 } from "@/lib/grid/a1";
 import { notifyWorkbookEdit } from "@/lib/grid/calc-host";
 import { formatCellDisplay } from "@/lib/grid/format";
 import { useWorkbookStore } from "@/lib/grid/model";
+import { applyAnchorPick } from "@/lib/grid/run-block";
 import { cellKey, type Cell, type CellRange, type PyBlock } from "@/types/workbook";
 
 /** §3.4: spill 잠금 안내 문구 */
@@ -56,6 +57,7 @@ const DEFAULT_COL_WIDTH = 88;
 const PRIMARY = "#4A90C2";
 const WARNING = "#D9A441";
 const DESTRUCTIVE = "#C2504A";
+const MUTED = "#6B7280";
 
 /** 단일 셀 편집 시 단순 유형 추론: 숫자 → n, TRUE/FALSE → b, 나머지 문자열 */
 function inferCell(text: string): Cell | null {
@@ -344,22 +346,23 @@ export default function SheetGrid() {
         ctx.restore();
       }
 
-      // [PY] 앵커 배지 (우상단 칩)
+      // 앵커 배지 (우상단 칩) — 코드는 [PY], 마크다운은 [§](Python 관여가 아니라 muted)
       if (anchorBlock) {
+        const isMd = anchorBlock.kind === "markdown";
         ctx.save();
-        const w = 22;
+        const w = isMd ? 12 : 22;
         const h = 11;
         const x = rect.x + rect.width - w - 2;
         const y = rect.y + 2;
-        ctx.fillStyle = PRIMARY;
+        ctx.fillStyle = isMd ? MUTED : PRIMARY;
         ctx.beginPath();
         ctx.roundRect(x, y, w, h, 2);
         ctx.fill();
         ctx.fillStyle = "#FFFFFF";
-        ctx.font = `700 7px "JetBrains Mono", monospace`;
+        ctx.font = `700 ${isMd ? 9 : 7}px "JetBrains Mono", monospace`;
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
-        ctx.fillText("PY", x + w / 2, y + h / 2 + 0.5);
+        ctx.fillText(isMd ? "§" : "PY", x + w / 2, y + h / 2 + 0.5);
         ctx.restore();
       }
     },
@@ -443,10 +446,15 @@ export default function SheetGrid() {
     [sheet.id],
   );
 
-  /** 클릭 라우팅: 오류 셀 → 진단 탭(§2.3.7), 객체 카드 → 출력 미리보기 탭(§2.3.4) */
+  /** 클릭 라우팅: 출력 위치 지정 → 앵커 이동, 오류 셀 → 진단 탭(§2.3.7), 객체 카드 → 출력 미리보기 탭(§2.3.4) */
   const onCellClicked = useCallback(
     (item: Item) => {
       const [col, row] = item;
+      const picking = useWorkbookStore.getState().anchorPickingBlockId;
+      if (picking) {
+        applyAnchorPick(picking, sheet.id, { r: row, c: col });
+        return;
+      }
       const key = cellKey(row, col);
       const cell = sheet.cells[key];
       if (!cell?.src) return;
@@ -462,7 +470,7 @@ export default function SheetGrid() {
         store.setBottomTab("preview");
       }
     },
-    [sheet.cells, anchorMap],
+    [sheet.cells, sheet.id, anchorMap],
   );
 
   /** 우클릭: 셀 기록(+선택 이동). radix ContextMenu가 메뉴를 연다 */
@@ -569,19 +577,21 @@ export default function SheetGrid() {
       <ContextMenuContent>
         {menuBlock && (
           <>
-            <ContextMenuItem
-              onClick={() =>
-                useWorkbookStore
-                  .getState()
-                  .setBlockOutputMode(
-                    menuBlock.id,
-                    menuBlock.outputMode === "values" ? "object" : "values",
-                  )
-              }
-            >
-              Python 출력 →{" "}
-              {menuBlock.outputMode === "values" ? "Python 객체" : "Excel 값"}
-            </ContextMenuItem>
+            {menuBlock.kind !== "markdown" && (
+              <ContextMenuItem
+                onClick={() =>
+                  useWorkbookStore
+                    .getState()
+                    .setBlockOutputMode(
+                      menuBlock.id,
+                      menuBlock.outputMode === "values" ? "object" : "values",
+                    )
+                }
+              >
+                Python 출력 →{" "}
+                {menuBlock.outputMode === "values" ? "Python 객체" : "Excel 값"}
+              </ContextMenuItem>
+            )}
             <ContextMenuItem
               onClick={() => useWorkbookStore.getState().setFocusBlock(menuBlock.id)}
             >

@@ -2,7 +2,7 @@
 // 역할: 워커 부트, 준비 전 큐잉, 요청/응답 매핑, 진행률·stdout 이벤트,
 //       타임아웃 → 인터럽트(SAB) → 실패 시 terminate+재부트 폴백.
 
-import type { IncludeIndex, OutputMode } from "@/types/workbook";
+import type { IncludeIndex, OutputMode, OutputSelection } from "@/types/workbook";
 import {
   BOOT_PACKAGES,
   DEFAULT_PYODIDE_INDEX_URL,
@@ -297,7 +297,7 @@ export class RuntimeClient {
 
   // ── 공개 API ────────────────────────────────────────────
 
-  /** 블록 실행. M3는 object 모드 repr 미리보기만 반환한다(M4에서 변환 추가) */
+  /** 블록 실행. output(출력 선택)을 주면 마지막 표현식 대신 지정 변수·열·행이 결과가 된다 */
   async run(
     blockId: string,
     code: string,
@@ -305,10 +305,11 @@ export class RuntimeClient {
     outputMode: OutputMode = "object",
     includeIndex: IncludeIndex = "auto",
     timeoutSec = this.defaultTimeoutSec,
+    output?: OutputSelection,
   ): Promise<RunPayload> {
     const id = this.nextId++;
     const res = (await this.request(
-      { t: "run", id, blockId, code, snapshots, outputMode, includeIndex },
+      { t: "run", id, blockId, code, snapshots, outputMode, includeIndex, output },
       { busy: true, timeoutSec },
     )) as Extract<WorkerToMain, { t: "result" }>;
     const { t: _t, id: _id, blockId: _blockId, ...payload } = res;
