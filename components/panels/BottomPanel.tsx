@@ -9,15 +9,23 @@ import DiagnosticsTab from "@/components/panels/DiagnosticsTab";
 import OutputPreviewTab from "@/components/panels/OutputPreviewTab";
 import VariablesTab from "@/components/panels/VariablesTab";
 import { useWorkbookStore, type WorkbookState } from "@/lib/grid/model";
+import { outputsOf } from "@/lib/grid/outputs";
 import type { RuntimeClient } from "@/lib/runtime/client";
 
 export default function BottomPanel({ client }: { client: RuntimeClient }) {
   const tab = useWorkbookStore((s) => s.bottomTab);
-  const errorCount = useWorkbookStore(
-    (s) =>
-      s.workbook.pyBlocks.filter(
-        (b) => b.last?.status === "error" || b.last?.status === "spill",
-      ).length,
+  // 오류 수는 출력 단위로 센다 — 한 블록의 일부 출력만 실패할 수 있다 (부록 D.1)
+  const errorCount = useWorkbookStore((s) =>
+    s.workbook.pyBlocks
+      .filter((b) => b.kind !== "markdown")
+      .reduce(
+        (n, b) =>
+          n +
+          outputsOf(b).filter(
+            (o) => o.last?.status === "error" || o.last?.status === "spill",
+          ).length,
+        0,
+      ),
   );
 
   return (

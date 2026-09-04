@@ -343,6 +343,26 @@ test("다중 출력: 한 블록의 두 결과를 서로 다른 셀에 (부록 D.
   expect(await outputCellCount(page, 0)).toBe(12);
   expect(await outputCellCount(page, 1)).toBe(1);
 
+  // 진단 탭: 출력마다 상태·오류가 따로 보인다. avg를 지워 출력 #2만 실패시킨다
+  await editor.fill(
+    'df = xl("A1:B6", headers=True)\ntotal = int(df["a"].sum())\nif "avg" in globals():\n    del avg\ndf',
+  );
+  await page.getByRole("button", { name: "실행", exact: true }).click();
+  await expect
+    .poll(async () => (await cellAt(page, "9:6"))?.v, { timeout: 90_000, intervals: [500] })
+    .toBe("#PYTHON!");
+  expect((await cellAt(page, "0:3"))?.v).toBe("a"); // 출력 #1은 정상 유지
+
+  const diagTab = page.getByRole("tab", { name: /진단/ });
+  await diagTab.click();
+  const diag = page.getByTestId("diagnostics-tab");
+  await expect(diag.getByText("출력 1", { exact: true })).toBeVisible();
+  await expect(diag.getByText("avg", { exact: true })).toBeVisible();
+  // 한국어 요약(<p>)과 traceback(<pre>)이 함께 보인다 — 요약만 겨냥
+  await expect(diag.getByText(/정의되지 않은 이름을 사용했습니다/)).toBeVisible();
+  await expect(diag.getByText(/Traceback/)).toBeAttached();
+  await expect(diagTab).toContainText("1"); // 오류 배지 = 실패한 출력 수
+
   // 출력 삭제 → 그 영역만 비워진다
   await codeCard.getByRole("button", { name: "출력 2 삭제" }).click();
   expect(await cellAt(page, "9:6")).toBeNull();
