@@ -636,3 +636,46 @@ PyBlock.outputs?: OutputBinding[]   // 정본. 레거시 단일 필드는 output
 ### D.3 마크다운 렌더러 확장
 
 인용(`>`)과 중첩 목록을 추가하고 h1/h2 크기 대비를 키운다. 렌더러는 계속 **React 요소만 생성**하며 원시 HTML을 해석하지 않는다(공유 파일 안전성).
+
+---
+
+## 부록 E. v1.3 확장 — 데이터 예제/분석 이식 + AI 코드 지원 (2026-09-05 확정)
+
+소스: `C:\00 App Project\Actuarial_Platform`(insurance-insights-board)의 `/datalab`. 이식 대상은 **엑셀함수·파이썬코드·분포·모델적합 4탭**과 실행기의 **데이터 불러오기**, **AI 코드 지원**이다. 예제(게시판) 탭과 PyRunner 자체는 이식하지 않는다 — 이 앱의 워크북이 실행기다.
+
+### E.0 확정 결정
+
+| 항목 | 결정 |
+|------|------|
+| 배치 | 별도 라우트가 아니라 **같은 화면 내 뷰 전환** — 헤더 [워크북 \| 데이터 예제/분석], 워크북은 hidden 유지(런타임·상태 보존, 소스와 동일한 방식) |
+| 콘텐츠 | 소스의 정적 TS 데이터(~1MB)를 `lib/reference/`로 **그대로 복사**해 내용을 최대한 유지. Supabase 관리자 override 레이어는 제거 |
+| 코드 연계 | "블록으로 보내기" = **마크다운 제목 블록(# 메서드명) + 선택 섹션별 코드 블록** 생성(빈 영역 자동 앵커) 후 워크북 뷰로 전환 — 목차에 바로 잡힘 |
+| 데이터 불러오기 | 파일/URL/샘플(xlsx 5종) → **시트에 표시**(기존 M7 경로) **+ 워커 FS에도 기록** → 참조 코드의 `pd.read_*`가 그대로 동작. 선택적으로 로드 블록 자동 생성(xl() 참조 기본) |
+| AI 호출 | 서버 라우트 없음 — **브라우저에서 Anthropic API 직접 호출**(`anthropic-dangerous-direct-browser-access: true`). **API 키는 웹앱 설정 다이얼로그에서 직접 입력**, IndexedDB에만 저장(워크북 파일·git에 절대 미포함). 키 없으면 기능이 키 입력 안내로 대체 |
+| 스타일 | 현재 앱의 토큰·블록 구조·코드 작성 과정 유지. 소스의 chip CSS 변수(`--chip-*-bg/fg`)만 globals.css에 추가 |
+
+### E.1 이식 자산 목록
+
+- **데이터**(`lib/reference/`로 복사, 검증은 tsc): excelFunctions(+Data 69종), statMethods(~50종)+actuarialMethods+stepwiseMethods+modelResultSections, methodTheory(48)·methodExcelCode(+Data 47)·methodOptionDocs·dataLayouts·methodTracks, wrangleSnippets(52)·plotSnippets(20), distributions(11종)+distMath, fitData·fitPython·FIT_SCRIPT(pyFit), StatInfoDialog의 STAT_INFOS
+- **샘플 데이터**: `public/samples/` — policy·claims·experience·triangle·mortality_table.xlsx
+- **컴포넌트**(우리 토큰·shadcn으로 개작): 탭 셸, ExcelFunctionCloud(사분면 SVG+모바일 클러스터+다이얼로그), MethodCloud(5탭 다이얼로그: 정의·파이썬·엑셀·옵션·레이아웃), DistributionLab/DistCard/DistChart(순수 SVG 차트·비교·VaR/TVaR·QQ), FitLab(데이터 입력·경험적 패널·적합·결과 표·코드 생성), 공용(CodeBlock/CopyButton/정규식 하이라이터, KaTeX Tex, FunctionSearch). 소스의 pinnable/PiP 다이얼로그는 shadcn Dialog로 간소화
+- **의존성 추가**: `katex`(+타입)만. Pyodide는 기존 워커 재사용
+
+### E.2 단계 계획
+
+| 단계 | 내용 | 검증 |
+|------|------|------|
+| R1 | `lib/reference/` 데이터 이식 + katex 설치 + 샘플 xlsx 복사 | tsc, 데이터 통계 단위 테스트(개수·필수 필드) |
+| R2 | 뷰 전환 구조 + 4탭 셸 + 공용 프리미티브 + chip 토큰 | tsc·build, 뷰 전환 e2e(워크북 상태 보존) |
+| R3 | 엑셀함수·파이썬코드 탭 + **블록으로 보내기** 연계 | 탭 렌더·다이얼로그·보내기 e2e(블록 생성·목차 반영) |
+| R4 | 분포·모델적합 탭 — 적합 엔진은 **우리 워커**로: protocol에 `{t:'writeFile', path, bytes}` 추가(transferable), FIT_SCRIPT를 repl 경유 실행·JSON 파싱 | 분포 차트 렌더 e2e, 샘플 데이터 적합 1회 e2e |
+| R5 | 데이터 불러오기 통합: FileMenu에 URL·샘플 추가, 모든 열기 경로가 시트+워커 FS 동시 반영, cp949 감지 이식, 로드 블록 옵션 | 샘플 열기→시트 표시→`pd.read_excel` 동작 e2e |
+| R6 | AI 코드 지원: 설정 다이얼로그(키 입력·삭제·로컬 저장 안내), 브라우저 직접 호출 클라이언트, 4모드(생성/수정/변수반영/에러분석), 제안 패널·새 블록 반영(자동 적용 없음 — 소스 UX 유지), **시스템 프롬프트를 이 앱 규칙으로 개작**(xl() 참조·spill·다중 출력·시트 스키마+런타임 변수 스키마 전달) | 키 없음 UX e2e, 키 입력 저장 e2e(호출 자체는 수동 검증) |
+| R7 | 회귀 전체(기존 e2e), 문서(parity·conversion-rules 갱신), 커밋·푸시 | 전체 게이트 |
+
+### E.3 원칙
+
+- 참조 콘텐츠는 읽기 전용 자산이다 — 수정은 소스 프로젝트가 아니라 `lib/reference/`에서 독립적으로 이뤄진다(단절 복사).
+- FitLab·분포 계산(JS 수치·SVG 차트)은 의존성 없이 그대로 유지한다.
+- AI 응답은 절대 자동 실행·자동 적용하지 않는다(제안 → 사용자가 반영).
+- API 키는 어떤 저장 경로(워크북 JSON·내보내기·git)에도 실리지 않는다. IndexedDB settings 전용 필드.
