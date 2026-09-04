@@ -5,6 +5,7 @@
 import { parseA1 } from "@/lib/grid/a1";
 import type {
   BlockKind,
+  OutputBinding,
   Cell,
   CellRange,
   CellType,
@@ -13,7 +14,7 @@ import type {
   OutputSelection,
 } from "@/types/workbook";
 import { spillRange, toCells } from "./converters";
-import type { RangeSnapshot, RunPayload } from "./protocol";
+import type { OutputItem, OutputRequest, RangeSnapshot, RunPayload } from "./protocol";
 
 // ── 데이터 형태 ──────────────────────────────────────────
 
@@ -28,7 +29,12 @@ export interface CalcBlock {
   output?: OutputSelection;
   /** 'markdown' 블록은 실행 대상이 아니다 — 큐·그래프에서 제외 */
   kind?: BlockKind;
+  /** 다중 출력. 있으면 outputMode/includeIndex/output 대신 이쪽이 정본 */
+  outputs?: OutputBinding[];
 }
+
+/** 블록이 점유한 출력 영역 (sheetId 생략 시 블록 시트) */
+export type OutputArea = CellRange & { sheetId?: string };
 
 export interface SheetRange extends CellRange {
   sheetId: string;
@@ -48,6 +54,11 @@ export interface WorkbookView {
   sheetOrder: string[];
   /** 값 모드 블록의 현재 spill 범위. 없으면 앵커 1×1로 간주 */
   spills: Map<string, CellRange | undefined>;
+  /**
+   * 다중 출력 블록이 점유한 영역들(값 모드 spill 범위, 객체 모드 앵커 1×1).
+   * 있으면 spills보다 우선한다 — 의존성 대상은 이 영역 전부다.
+   */
+  areas?: Map<string, OutputArea[]>;
 }
 
 /** 마크다운 블록은 실행 대상이 아니다 — 그래프·순서·dirty·실행 큐 전부에서 제외한다 */
@@ -78,26 +89,30 @@ export function resolveRefs(
 
 // ── a. 그래프 ────────────────────────────────────────────
 
-/** B의 참조가 A의 spill 범위(값 모드) 또는 앵커 셀(객체 모드)과 겹치면 B는 A에 의존 (§2.4) */
+/** B의 참조가 A의 출력 영역(다중 출력이면 전부, 아니면 spill 범위/앵커 셀)과 겹치면 B는 A에 의존 (§2.4) */
 export function buildGraph(
   all: CalcBlock[],
   resolved: Map<string, SheetRange[]>,
   spills: Map<string, CellRange | undefined>,
+  areas?: Map<string, OutputArea[]>,
 ): CalcGraph {
   const blocks = all.filter(isExecutable); // 마크다운은 노드가 아니다(참조 대상도 아님)
-  const target = (b: CalcBlock): SheetRange => {
+  const targets = (b: CalcBlock): SheetRange[] => {
+    const own = areas?.get(b.id);
+    // 다중 출력: 등록된 영역 전부가 의존 대상 (areas가 spills를 이긴다)
+    if (own && own.length > 0) return own.map((a) => ({ ...a, sheetId: a.sheetId ?? b.sheetId }));
     const spill = b.outputMode === "values" ? spills.get(b.id) : undefined;
     const r = spill ?? { r0: b.anchor.r, c0: b.anchor.c, r1: b.anchor.r, c1: b.anchor.c };
-    return { ...r, sheetId: b.sheetId };
+    return [{ ...r, sheetId: b.sheetId }];
   };
   const deps = new Map(blocks.map((b) => [b.id, new Set<string>()]));
   const dependents = new Map(blocks.map((b) => [b.id, new Set<string>()]));
   // ponytail: O(블록² × 참조) 전수 비교 — 블록 수백 개 규모라 무해. 병목이 되면 시트별 인덱스로
   for (const a of blocks) {
-    const t = target(a);
+    const ts = targets(a);
     for (const b of blocks) {
       if (a.id === b.id) continue;
-      if ((resolved.get(b.id) ?? []).some((ref) => overlaps(ref, t))) {
+      if ((resolved.get(b.id) ?? []).some((ref) => ts.some((t) => overlaps(ref, t)))) {
         deps.get(b.id)!.add(a.id);
         dependents.get(a.id)!.add(b.id);
       }
@@ -243,6 +258,20 @@ export interface CalcHost {
     cells: Cell[][] | null,
     spill: CellRange | null,
   ): void;
+  /**
+   * 다중 출력 결과 적용 (block.outputs가 있고 이 콜백을 구현했을 때 onResult 대신 호출된다).
+   * items[i].cells/spill은 값 모드 성공일 때만 채워진다. 실행 자체가 실패하면 items는 빈 배열.
+   */
+  onOutputs?(
+    blockId: string,
+    payload: RunPayload,
+    items: Array<{
+      outputId: string;
+      item: OutputItem;
+      cells: Cell[][] | null;
+      spill: CellRange | null;
+    }>,
+  ): void;
 }
 
 /** RuntimeClient가 구조적으로 만족하는 최소 표면 (테스트 mock용) */
@@ -256,6 +285,7 @@ export interface RuntimeLike {
     includeIndex: IncludeIndex,
     timeoutSec?: number,
     output?: OutputSelection,
+    outputs?: OutputRequest[],
   ): Promise<RunPayload>;
 }
 
@@ -380,7 +410,7 @@ export class RunCoordinator {
         resolved.set(b.id, []); // 분석 실패 블록: 의존성 없음. 실행 단계에서 오류로 보고된다
       }
     }
-    return { resolved, graph: buildGraph(view.blocks, resolved, view.spills) };
+    return { resolved, graph: buildGraph(view.blocks, resolved, view.spills, view.areas) };
   }
 
   private buildSnapshots(refs: string[], ownSheetId: string): Record<string, RangeSnapshot> {
@@ -432,6 +462,8 @@ export class RunCoordinator {
         this.host.onResult(id, failure("PyGridRefError", msg(e)), null, null);
         continue;
       }
+      // 다중 출력: 호스트가 onOutputs를 구현했을 때만 (미구현이면 레거시 단일 출력으로)
+      const multi = block.outputs?.length && this.host.onOutputs ? block.outputs : undefined;
       let payload: RunPayload;
       try {
         payload = await this.client.run(
@@ -442,10 +474,38 @@ export class RunCoordinator {
           block.includeIndex,
           this.timeoutSec,
           block.output,
+          multi?.map((o) => ({
+            id: o.id,
+            mode: o.mode,
+            includeIndex: o.includeIndex,
+            selection: o.selection,
+          })),
         );
       } catch (e) {
         // 타임아웃 → interrupt → 재부트로 요청이 거부된 경우 등
-        this.host.onResult(id, failure("WorkerError", msg(e)), null, null);
+        const err = failure("WorkerError", msg(e));
+        if (multi) this.host.onOutputs!(id, err, []);
+        else this.host.onResult(id, err, null, null);
+        continue;
+      }
+      if (multi) {
+        const anchors = new Map(multi.map((o) => [o.id, o.anchor]));
+        this.host.onOutputs!(
+          id,
+          payload,
+          (payload.ok ? (payload.outputs ?? []) : []).map((item) => {
+            const anchor = anchors.get(item.id);
+            const cells = item.ok && anchor ? (item.cells ?? null) : null;
+            return {
+              outputId: item.id,
+              item,
+              cells: cells ? toCells(cells) : null,
+              spill: cells
+                ? spillRange(anchor!, cells.length, cells[0]?.length ?? 0)
+                : null,
+            };
+          }),
+        );
         continue;
       }
       if (payload.ok && block.outputMode === "values" && payload.cells) {

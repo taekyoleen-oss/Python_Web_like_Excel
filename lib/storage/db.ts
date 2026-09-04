@@ -14,6 +14,8 @@ export interface AppSettings {
   pasteAlwaysDialog?: boolean;
   /** 붙여넣기 날짜 추론 순서 — 9/2/2026 같은 모호한 표기 해석 (기본 'ymd') */
   dateOrder?: "ymd" | "mdy";
+  /** 목차 전용 패널 열림 (기본 false) */
+  tocOpen?: boolean;
 }
 
 const DB_NAME = "pygrid";

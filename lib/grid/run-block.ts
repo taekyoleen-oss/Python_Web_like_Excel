@@ -4,12 +4,19 @@ import { toast } from "sonner";
 import type { BlockKind } from "@/types/workbook";
 import { formatA1 } from "./a1";
 import { getCoordinator, makeView, notifyWorkbookEdit, toastIfQueued } from "./calc-host";
-import { useWorkbookStore } from "./model";
+import { useWorkbookStore, type AnchorPickTarget } from "./model";
 
 /** ▶ 단일 실행: 해당 블록 + 하위 의존 블록을 위상 순서로 (§2.4) */
 export async function runBlock(blockId: string): Promise<void> {
   toastIfQueued();
   await getCoordinator().runBlocks([blockId], makeView());
+}
+
+/** ▶ 여러 블록(목차 절 실행 등) — 시드 + 하위 의존을 위상 순서로 */
+export async function runBlocks(blockIds: string[]): Promise<void> {
+  if (blockIds.length === 0) return;
+  toastIfQueued();
+  await getCoordinator().runBlocks(blockIds, makeView());
 }
 
 /** 전체 실행 — 변수 공유만으로 이어진 블록의 순서는 여기서만 보장된다(§2.4) */
@@ -53,11 +60,14 @@ export const addMarkdownAtSelection = (): void => addAtSelection("markdown");
 
 /** 출력 위치 지정 확정 — 실패는 사유 toast, 성공은 자동 모드에서 재실행(수동은 dirty 배지) */
 export function applyAnchorPick(
-  blockId: string,
+  target: AnchorPickTarget,
   sheetId: string,
   anchor: { r: number; c: number },
 ): void {
-  const err = useWorkbookStore.getState().setBlockAnchor(blockId, anchor, sheetId);
+  const { blockId, outputId } = target;
+  const err = useWorkbookStore
+    .getState()
+    .setOutputAnchor(blockId, outputId, { sheetId, r: anchor.r, c: anchor.c });
   if (err) {
     toast.error(err);
     return;

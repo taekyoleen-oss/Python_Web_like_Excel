@@ -8,6 +8,7 @@ import {
   DEFAULT_PYODIDE_INDEX_URL,
   INTERRUPT_SIGINT,
   type MainToWorker,
+  type OutputRequest,
   type RangeSnapshot,
   type RunPayload,
   type VariableInfo,
@@ -297,7 +298,9 @@ export class RuntimeClient {
 
   // ── 공개 API ────────────────────────────────────────────
 
-  /** 블록 실행. output(출력 선택)을 주면 마지막 표현식 대신 지정 변수·열·행이 결과가 된다 */
+  /** 블록 실행. output(출력 선택)을 주면 마지막 표현식 대신 지정 변수·열·행이 결과가 된다.
+   *  outputs(다중 출력)를 주면 코드를 1회만 실행하고 요청마다 변환해 `payload.outputs`로 돌려준다
+   *  — 이때 outputMode/includeIndex/output은 무시된다 */
   async run(
     blockId: string,
     code: string,
@@ -306,10 +309,11 @@ export class RuntimeClient {
     includeIndex: IncludeIndex = "auto",
     timeoutSec = this.defaultTimeoutSec,
     output?: OutputSelection,
+    outputs?: OutputRequest[],
   ): Promise<RunPayload> {
     const id = this.nextId++;
     const res = (await this.request(
-      { t: "run", id, blockId, code, snapshots, outputMode, includeIndex, output },
+      { t: "run", id, blockId, code, snapshots, outputMode, includeIndex, output, outputs },
       { busy: true, timeoutSec },
     )) as Extract<WorkerToMain, { t: "result" }>;
     const { t: _t, id: _id, blockId: _blockId, ...payload } = res;

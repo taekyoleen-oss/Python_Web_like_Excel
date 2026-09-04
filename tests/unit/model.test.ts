@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { createWorkbookStore } from "@/lib/grid/model";
+import { createWorkbook, createWorkbookStore } from "@/lib/grid/model";
+import type { PyBlock, Workbook } from "@/types/workbook";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -282,6 +283,190 @@ describe("블록 앵커 재지정·접기·출력 선택", () => {
     expect(out()).toEqual({ rowLimit: 3 });
     store.getState().setBlockOutput(id, { rowLimit: undefined });
     expect(out()).toBeUndefined();
+  });
+});
+
+describe("다중 출력 (부록 D.1)", () => {
+  const okResult = (spill?: { r0: number; c0: number; r1: number; c1: number }) => ({
+    status: "ok" as const,
+    stdout: "",
+    stderr: "",
+    durationMs: 1,
+    ranAt: "",
+    ...(spill ? { spillRange: spill } : {}),
+  });
+
+  /** A1 블록 + 출력 1개(A1) — 정규화로 outputs가 자동 생성된다 */
+  const seed = () => {
+    const { store, sheetId } = fresh();
+    const id = store.getState().addPyBlock(sheetId, { r: 0, c: 0 })!;
+    const block = () => store.getState().workbook.pyBlocks.find((b) => b.id === id)!;
+    return { store, sheetId, id, block };
+  };
+
+  it("addPyBlock은 outputs 1개로 시작하고 레거시 필드와 동기화된다", () => {
+    const { block } = seed();
+    const outputs = block().outputs!;
+    expect(outputs).toHaveLength(1);
+    expect(outputs[0]).toMatchObject({
+      anchor: { r: 0, c: 0 },
+      mode: "values",
+      includeIndex: "auto",
+    });
+    expect(outputs[0].id).toBeTruthy();
+    expect(block().anchor).toEqual(outputs[0].anchor);
+  });
+
+  it("spill 셀의 src는 '<blockId>:<outputId>'로 기록된다", () => {
+    const { store, id, block } = seed();
+    const outputId = block().outputs![0].id;
+    store.getState().applyBlockResult(id, [[{ v: 1, t: "n" }]], {
+      last: okResult({ r0: 0, c0: 0, r1: 0, c1: 0 }),
+      clearPrevious: true,
+    });
+    expect(cells(store)["0:0"].src).toBe(`${id}:${outputId}`);
+  });
+
+  it("addOutput: 블록 옆 빈 셀에 추가, 각 출력이 독립된 영역에 기록된다", () => {
+    const { store, id, block } = seed();
+    const out1 = block().outputs![0].id;
+    const out2 = store.getState().addOutput(id)!;
+    expect(block().outputs).toHaveLength(2);
+    const anchor2 = block().outputs![1].anchor;
+    expect(anchor2.r).toBe(0);
+    expect(anchor2.c).toBeGreaterThan(0); // 블록 앵커와 겹치지 않는다
+
+    store.getState().applyOutputResults(id, [
+      {
+        outputId: out1,
+        cells: [[{ v: 1, t: "n" }], [{ v: 2, t: "n" }]],
+        clearPrevious: true,
+        last: okResult({ r0: 0, c0: 0, r1: 1, c1: 0 }),
+      },
+      {
+        outputId: out2,
+        cells: [[{ v: "x", t: "s" }]],
+        clearPrevious: true,
+        last: okResult({ r0: anchor2.r, c0: anchor2.c, r1: anchor2.r, c1: anchor2.c }),
+      },
+    ]);
+    expect(cells(store)["0:0"].src).toBe(`${id}:${out1}`);
+    expect(cells(store)["1:0"].src).toBe(`${id}:${out1}`);
+    expect(cells(store)[`0:${anchor2.c}`]).toMatchObject({ v: "x", src: `${id}:${out2}` });
+    // 레거시 뷰는 outputs[0]만 반영한다
+    expect(block().last?.spillRange).toEqual({ r0: 0, c0: 0, r1: 1, c1: 0 });
+  });
+
+  it("한 실행의 모든 출력 반영 = undo 한 단계", async () => {
+    const { store, id, block } = seed();
+    const out1 = block().outputs![0].id;
+    const out2 = store.getState().addOutput(id)!;
+    await sleep(350);
+    const depth = store.temporal.getState().pastStates.length;
+
+    store.getState().applyOutputResults(id, [
+      { outputId: out1, cells: [[{ v: 1, t: "n" }]], clearPrevious: true, last: okResult() },
+      { outputId: out2, cells: [[{ v: 2, t: "n" }]], clearPrevious: true, last: okResult() },
+    ]);
+    await sleep(350);
+    expect(store.temporal.getState().pastStates.length).toBe(depth + 1);
+
+    store.temporal.getState().undo();
+    expect(Object.keys(cells(store))).toHaveLength(0);
+  });
+
+  it("removeOutput: 그 출력의 spill만 지운다, 마지막 하나는 거부", () => {
+    const { store, id, block } = seed();
+    const out1 = block().outputs![0].id;
+    const out2 = store.getState().addOutput(id)!;
+    const c2 = block().outputs![1].anchor.c;
+    store.getState().applyOutputResults(id, [
+      { outputId: out1, cells: [[{ v: 1, t: "n" }]], clearPrevious: true, last: okResult() },
+      { outputId: out2, cells: [[{ v: 2, t: "n" }]], clearPrevious: true, last: okResult() },
+    ]);
+    expect(Object.keys(cells(store))).toHaveLength(2);
+
+    store.getState().removeOutput(id, out2);
+    expect(block().outputs).toHaveLength(1);
+    expect(cells(store)[`0:${c2}`]).toBeUndefined(); // 지운 출력의 셀만 사라진다
+    expect(cells(store)["0:0"]?.v).toBe(1);
+
+    store.getState().removeOutput(id, out1); // 마지막 출력은 남는다
+    expect(block().outputs).toHaveLength(1);
+  });
+
+  it("setOutputAnchor: 그 출력의 옛 spill만 제거하고 이동, 충돌은 거부", () => {
+    const { store, id, block } = seed();
+    const out1 = block().outputs![0].id;
+    const out2 = store.getState().addOutput(id)!;
+    const c2 = block().outputs![1].anchor.c;
+    store.getState().applyOutputResults(id, [
+      {
+        outputId: out1,
+        cells: [[{ v: 1, t: "n" }]],
+        clearPrevious: true,
+        last: okResult({ r0: 0, c0: 0, r1: 0, c1: 0 }),
+      },
+      {
+        outputId: out2,
+        cells: [[{ v: 2, t: "n" }]],
+        clearPrevious: true,
+        last: okResult({ r0: 0, c0: c2, r1: 0, c1: c2 }),
+      },
+    ]);
+
+    expect(store.getState().setOutputAnchor(id, out2, { r: 8, c: 8 })).toBeNull();
+    expect(block().outputs![1].anchor).toEqual({ r: 8, c: 8 });
+    expect(cells(store)[`0:${c2}`]).toBeUndefined(); // 옮긴 출력의 옛 셀만 제거
+    expect(cells(store)["0:0"]?.v).toBe(1); // 다른 출력은 그대로
+    expect(block().anchor).toEqual({ r: 0, c: 0 }); // 블록 앵커(=outputs[0])는 그대로
+
+    // 같은 블록의 다른 출력 위로는 옮길 수 없다
+    expect(store.getState().setOutputAnchor(id, out2, { r: 0, c: 0 })).toMatch(/다른 출력/);
+  });
+
+  it("setBlockAnchor는 outputs[0]을 옮긴다 (레거시 경로)", () => {
+    const { store, id, block } = seed();
+    expect(store.getState().setBlockAnchor(id, { r: 4, c: 4 })).toBeNull();
+    expect(block().anchor).toEqual({ r: 4, c: 4 });
+    expect(block().outputs![0].anchor).toEqual({ r: 4, c: 4 });
+  });
+
+  it("구 워크북 로드: outputs 생성 + src === blockId 태그 이관", () => {
+    const { store } = fresh();
+    const wb: Workbook = createWorkbook();
+    const sheetId = wb.sheets[0].id;
+    const legacy: PyBlock = {
+      id: "old-block",
+      sheetId,
+      anchor: { r: 2, c: 1 },
+      code: "1+1",
+      outputMode: "values",
+      includeIndex: "auto",
+      output: { rowLimit: 5 },
+    };
+    wb.pyBlocks = [legacy];
+    wb.sheets[0].cells = {
+      "2:1": { v: 1, t: "n", src: "old-block" },
+      "3:1": { v: 2, t: "n", src: "old-block" },
+      "0:5": { v: "사용자", t: "s" },
+    };
+    store.getState().loadWorkbook(wb);
+
+    const block = store.getState().workbook.pyBlocks[0];
+    const outputId = block.outputs![0].id;
+    expect(block.outputs).toHaveLength(1);
+    expect(block.outputs![0]).toMatchObject({ anchor: { r: 2, c: 1 }, selection: { rowLimit: 5 } });
+    expect(cells(store)["2:1"].src).toBe(`old-block:${outputId}`);
+    expect(cells(store)["3:1"].src).toBe(`old-block:${outputId}`);
+    expect(cells(store)["0:5"].src).toBeUndefined();
+
+    // 이관된 태그로 spill 잠금·제거가 계속 동작한다
+    expect(store.getState().setCellValue(sheetId, 2, 1, { v: 9, t: "n" })).toBe(false);
+    store.getState().removePyBlock("old-block");
+    expect(cells(store)["2:1"]).toBeUndefined();
+    expect(cells(store)["3:1"]).toBeUndefined();
+    expect(cells(store)["0:5"]?.v).toBe("사용자");
   });
 });
 

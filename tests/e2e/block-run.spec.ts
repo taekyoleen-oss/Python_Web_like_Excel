@@ -29,8 +29,9 @@ const srcCellCount = (page: Page) =>
     const st = (window as any).__pygridStore.getState();
     const blockId = st.workbook.pyBlocks[0]?.id;
     if (!blockId) return 0;
+    // src는 "<blockId>:<outputId>" (부록 D.1)
     return Object.values(st.workbook.sheets[0].cells).filter(
-      (c: any) => c.src === blockId,
+      (c: any) => typeof c.src === "string" && c.src.split(":")[0] === blockId,
     ).length;
   });
 

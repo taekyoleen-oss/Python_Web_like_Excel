@@ -11,7 +11,7 @@
 | `lib/runtime/client.ts` | 메인 스레드 클라이언트: 부트, 준비 전 큐잉, 요청/응답 매핑, 타임아웃·인터럽트·재부트 |
 | `lib/runtime/py/bootstrap.py` | 워커 내부 헬퍼(`_pygrid_exec_capture`·`_pygrid_run`·`_pygrid_inspect`·`_pygrid_reset`·`_pygrid_mpl_setup`) |
 | `lib/runtime/py/xl.py` | `xl()` 브리지: 참조 추출(ast) + 스냅샷 캐시 → §3.3 입력 변환(DataFrame/스칼라) |
-| `lib/runtime/py/convert.py` | §3.3 출력 변환: 값 모드 `cells`, 객체 모드 preview/PNG |
+| `lib/runtime/py/convert.py` | §3.3 출력 변환: 값 모드 `cells`, 객체 모드 preview/PNG. 단일 출력 `_pygrid_run_convert`, 다중 출력 `_pygrid_run_convert_multi` |
 | `lib/runtime/converters.ts` | `OutCell[][]` → `Cell[][]`(`toCells`), 앵커+shape → `spillRange`. 순수 함수 |
 | `lib/runtime/py/init_default.py` | 기본 초기화 스크립트. `client.ts`가 `DEFAULT_INIT_SCRIPT`로 재수출 |
 
@@ -52,7 +52,7 @@
 | `boot` | indexURL, packages, initScript, fontUrl | 부트. 워커당 1회(중복 무시) |
 | `setInterruptBuffer` | buffer: SharedArrayBuffer | 인터럽트 버퍼. 체인 밖에서 즉시 적용(부트 전이면 보관) |
 | `analyze` | id, code | `xl()` 참조 추출(ast). 리터럴 위반 → `analyzeError` |
-| `run` | id, blockId, code, snapshots, outputMode, includeIndex, **output?** | 블록 실행: 스냅샷 주입 → 실행 → 출력 선택 → §3.3 변환 |
+| `run` | id, blockId, code, snapshots, outputMode, includeIndex, **output?**, **outputs?** | 블록 실행: 스냅샷 주입 → 실행 → 출력 선택 → §3.3 변환. `outputs`가 있으면 다중 출력 경로(아래) |
 | `repl` | id, code | 콘솔 실행(공유 네임스페이스) |
 | `inspect` | id | 전역 변수 목록 |
 | `resetRuntime` | id, initScript | 워커 안 best-effort 리셋(사용자 전역 삭제 → 초기화 스크립트 재실행) |
@@ -102,6 +102,35 @@
 
 적용 시점: **§3.3 변환 *전***(`convert.py`의 `_pygrid_select_output`). 따라서 값 모드 `cells`/`shape`와 객체 모드 `preview`/`shape`/`typeName`이 같은 선택을 반영한다.
 
+## 다중 출력 계약 (`run.outputs` → `RunSuccess.outputs`, v1.2)
+
+한 블록의 코드를 **1회만 실행**하고 결과의 여러 부분을 서로 다른 셀 위치에 배치하기 위한 경로다.
+`msg.outputs`가 있으면 `outputMode`/`includeIndex`/`output`(레거시 단일 출력 필드)은 **무시된다**.
+
+```ts
+OutputRequest = { id, mode, includeIndex, selection? }   // selection = OutputSelection (위 표와 동일 의미)
+OutputItemSuccess = { id, ok: true, kind, cells?, typeName?, shape?, preview?, imagePng? }
+OutputItemFailure = { id, ok: false, errorType, message, traceback? }
+RunSuccess.outputs?: OutputItem[]                        // 요청 순서 그대로
+```
+
+워커 동작: `JSON.stringify(msg.outputs)`를 `_pygrid_outputs`로 넣고
+`_pygrid_run_convert_multi(code, outputs_json)` 호출 → 본문 1회 exec(마지막 표현식 캡처) →
+요청마다 `variable` 선택 → `_pygrid_select_output` → `_pygrid_convert`. PNG는 출력마다 base64로 받아
+`ArrayBuffer`로 디코드하고 **전부 transferable로 넘긴다**. `RunSuccess.kind`는 첫 성공 출력의 kind(없으면 `"object"`) —
+다중 출력에서 의미 있는 값은 `outputs[]`뿐이므로 최상위 `cells`/`preview`/`imagePng`는 채우지 않는다.
+
+### 실패 격리 (conversion-rules #20~#23)
+
+| 무엇이 실패 | 결과 |
+|---|---|
+| 코드 본문(예외·`KeyboardInterrupt`) | **run 전체 실패** `RunFailure` — `outputs` 없음. grid-ui는 블록의 모든 출력에 같은 오류를 표시 |
+| 출력의 `selection.variable`이 없는 이름 | 그 출력만 `OutputItemFailure` `NameError` — 나머지 출력은 정상 배치, `payload.ok`는 여전히 `true` |
+| 값 모드 출력에 Figure | 그 출력만 `PyGridImageError` `이미지는 값으로 펼칠 수 없습니다` |
+| 변환 자체의 예상 밖 실패 | 그 출력만 `ConversionError` |
+
+`columns`/`rowLimit`/`includeIndex`는 출력마다 독립이다 — 같은 변수를 값 모드 상위 3행과 객체 모드 카드로 동시에 낼 수 있다.
+
 ## run 변환 결과 (§3.3 출력)
 
 - **값 모드**(`outputMode:'values'`): `cells: OutCell[][]` + `shape` + `kind`(1×1이면 `'scalar'` 아니면 `'table'`).
@@ -123,7 +152,7 @@
 ```ts
 getRuntimeClient(): RuntimeClient            // 앱 전역 싱글턴 (브라우저 전용)
 boot(opts?): Promise<void>                   // 멱등
-run(blockId, code, snapshots?, outputMode?, includeIndex?, timeoutSec?, output?): Promise<RunPayload>
+run(blockId, code, snapshots?, outputMode?, includeIndex?, timeoutSec?, output?, outputs?): Promise<RunPayload>
 repl(code, timeoutSec?): Promise<{ repr: string | null; traceback?: string }>
 analyze(code): Promise<string[]>             // 비리터럴 인수 → reject(Error(한국어 메시지))
 inspect(): Promise<VariableInfo[]>

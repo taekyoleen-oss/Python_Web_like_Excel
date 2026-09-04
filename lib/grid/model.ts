@@ -12,6 +12,7 @@ import {
   type CalcMode,
   type Cell,
   type CellRange,
+  type IncludeIndex,
   type OutputMode,
   type OutputSelection,
   type PyBlock,
@@ -21,15 +22,19 @@ import {
 } from "@/types/workbook";
 import { colToLetter } from "./a1";
 import { markdownTitle } from "./markdown";
+import {
+  newId,
+  normalizeBlock,
+  normalizeWorkbook,
+  outputsOf,
+  srcBlockId,
+  srcTag,
+  syncLegacy,
+} from "./outputs";
 import { checkSpillConflict } from "./spill";
 
 // 10k×50 셀 워크북을 deep-freeze하면 로드가 수 초 걸린다. 모든 변경은 스토어 액션 경유.
 setAutoFreeze(false);
-
-const newId = (): string =>
-  typeof crypto !== "undefined" && "randomUUID" in crypto
-    ? crypto.randomUUID()
-    : Math.random().toString(36).slice(2);
 
 export const createSheet = (name: string): Sheet => ({
   id: newId(),
@@ -72,6 +77,47 @@ export interface CellEdit {
   cell: Cell | null;
 }
 
+/** 한 출력의 실행 반영 단위 (applyOutputResults) */
+export interface OutputApply {
+  outputId: string;
+  /** 출력 앵커부터 기록할 셀. 실패·충돌은 1×1 오류 셀 */
+  cells: Cell[][];
+  /** 이전 spill 제거 (성공 시에만 교체 — 설계서 §4) */
+  clearPrevious?: boolean;
+  last?: RunResult;
+}
+
+/** 출력 위치 지정 중인 대상 (다음 그리드 클릭이 이 출력의 앵커가 된다) */
+export interface AnchorPickTarget {
+  blockId: string;
+  outputId: string;
+}
+
+/** 지정 출력(outputId 생략 시 블록 전체)의 spill 셀 제거 — 다른 시트 출력까지 훑는다 */
+function clearSpillCells(wb: Workbook, blockId: string, outputId?: string): void {
+  const tag = outputId === undefined ? undefined : srcTag(blockId, outputId);
+  for (const sheet of wb.sheets) {
+    for (const key of Object.keys(sheet.cells)) {
+      const src = sheet.cells[key].src;
+      if (!src) continue;
+      if (tag ? src === tag : srcBlockId(src) === blockId) delete sheet.cells[key];
+    }
+  }
+}
+
+/** 새 출력 자리 찾기용: 값·spill·블록 앵커·다른 출력 앵커가 있으면 쓸 수 없다 */
+function cellTaken(sheet: Sheet, blocks: PyBlock[], r: number, c: number): boolean {
+  const cell = sheet.cells[cellKey(r, c)];
+  if (cell && (cell.src || (cell.v !== null && cell.v !== ""))) return true;
+  return blocks.some(
+    (b) =>
+      (b.sheetId === sheet.id && b.anchor.r === r && b.anchor.c === c) ||
+      outputsOf(b).some(
+        (o) => (o.sheetId ?? b.sheetId) === sheet.id && o.anchor.r === r && o.anchor.c === c,
+      ),
+  );
+}
+
 export interface WorkbookState {
   workbook: Workbook;
   activeSheetId: string;
@@ -94,8 +140,10 @@ export interface WorkbookState {
   bottomTab: "diagnostics" | "preview" | "variables" | "console";
   /** 마지막으로 포커스된 블록 편집기 (참조 삽입·스니펫 대상) */
   lastEditorBlockId: string | null;
-  /** 출력 위치 지정 중인 블록 — 다음 그리드 클릭이 앵커가 된다 (transient) */
-  anchorPickingBlockId: string | null;
+  /** 출력 위치 지정 중인 출력 — 다음 그리드 클릭이 앵커가 된다 (transient) */
+  anchorPicking: AnchorPickTarget | null;
+  /** 목차 패널 열림 (설정에 저장, undo 대상 아님) */
+  tocOpen: boolean;
   /** spill 잠김(src) 셀이면 false를 반환하고 아무것도 바꾸지 않는다 */
   setCellValue: (sheetId: string, r: number, c: number, cell: Cell | null) => boolean;
   /** 일괄 편집 = 한 트랜잭션 = 한 undo 단계 */
@@ -143,17 +191,36 @@ export interface WorkbookState {
   /** 블록 + 그 spill 셀 제거 (한 트랜잭션) */
   removePyBlock: (id: string) => void;
   setBlockCode: (id: string, code: string) => void;
+  /** outputs[0]의 출력 모드 (레거시 뷰) */
   setBlockOutputMode: (id: string, mode: OutputMode) => void;
-  /** 출력 선택 병합. 값이 undefined인 키는 제거된다 */
+  /** outputs[0]의 출력 선택 병합. 값이 undefined인 키는 제거된다 (레거시 뷰) */
   setBlockOutput: (id: string, patch: OutputSelection) => void;
+  /** 출력 추가 — 블록 근처 빈 셀에 기본 바인딩(마지막 표현식·값 모드). 반환: 새 출력 id */
+  addOutput: (blockId: string) => string | null;
+  /** 출력 삭제 — 그 출력의 spill 셀을 같은 트랜잭션에서 지운다. 마지막 하나는 거부 */
+  removeOutput: (blockId: string, outputId: string) => void;
+  /**
+   * 출력 앵커 재지정 — 한 트랜잭션(= 한 undo 단계).
+   * 이 출력의 이전 spill 제거 + 앵커(·시트) 이동 + dirty 표시. 충돌하면 한국어 사유 반환.
+   */
+  setOutputAnchor: (
+    blockId: string,
+    outputId: string,
+    target: { sheetId?: string; r: number; c: number },
+  ) => string | null;
+  setOutputSelection: (blockId: string, outputId: string, patch: OutputSelection) => void;
+  setOutputMode: (blockId: string, outputId: string, mode: OutputMode) => void;
+  setOutputIncludeIndex: (blockId: string, outputId: string, value: IncludeIndex) => void;
+  setOutputLabel: (blockId: string, outputId: string, label: string) => void;
+  /** 한 실행의 모든 출력 반영 — 한 트랜잭션(= 한 undo 단계) */
+  applyOutputResults: (blockId: string, results: OutputApply[]) => void;
   setBlockMarkdown: (id: string, markdown: string) => void;
   setBlockTitle: (id: string, title: string) => void;
   setBlockCollapsed: (id: string, collapsed: boolean) => void;
   /** 패널 헤더 '모두 접기/펼치기' */
   setAllCollapsed: (collapsed: boolean) => void;
   /**
-   * 실행 결과 반영 — 한 트랜잭션(= 한 undo 단계).
-   * cells를 앵커부터 src=blockId로 기록. clearPrevious면 기존 spill(src===blockId) 먼저 제거.
+   * outputs[0] 결과 반영 (레거시 단일 출력 경로) — applyOutputResults의 얇은 래퍼.
    * 실패(#PYTHON!)·충돌(#SPILL!)은 앵커 1셀만 쓰고 이전 spill은 유지한다(설계서 §4: 성공 시에만 교체).
    */
   applyBlockResult: (
@@ -173,7 +240,8 @@ export interface WorkbookState {
   setSelectedBlock: (id: string | null) => void;
   setBottomTab: (tab: WorkbookState["bottomTab"]) => void;
   setLastEditorBlock: (id: string | null) => void;
-  setAnchorPicking: (id: string | null) => void;
+  setAnchorPicking: (target: AnchorPickTarget | null) => void;
+  setTocOpen: (open: boolean) => void;
 }
 
 const norm = (rg: CellRange): CellRange => ({
@@ -215,8 +283,11 @@ export const createWorkbookStore = () => {
   // partialize 메모화: workbook 참조가 같으면 같은 스냅샷 객체를 반환해
   // equality(===)로 selection/activeSheet 변경을 이력에서 제외한다.
   // 이력에서 빼는 블록 필드: last(실행 결과)·collapsed(카드 접기) — 문서 내용이 아니다.
+  // 출력별 last도 같은 이유로 제외한다(실행 결과가 undo 단계를 만들지 않게).
   const stripBlocks = (blocks: PyBlock[]) =>
-    blocks.map(({ last: _last, collapsed: _collapsed, ...b }) => b);
+    blocks.map(({ last: _last, collapsed: _collapsed, outputs, ...b }) =>
+      outputs ? { ...b, outputs: outputs.map(({ last: _l, ...o }) => o) } : b,
+    );
 
   /** 이력에 남길 변경이 없으면 true — 접기 토글만으로 undo 단계가 생기지 않게 한다 */
   const sameHistory = (a: Workbook, b: Workbook): boolean => {
@@ -265,7 +336,8 @@ export const createWorkbookStore = () => {
           selectedBlockId: null,
           bottomTab: "diagnostics" as const,
           lastEditorBlockId: null,
-          anchorPickingBlockId: null,
+          anchorPicking: null,
+          tocOpen: false,
 
           setCellValue: (sheetId, r, c, cell) => {
             const sheet = get().workbook.sheets.find((s) => s.id === sheetId);
@@ -458,14 +530,15 @@ export const createWorkbookStore = () => {
               state.lastEditorBlockId = null;
               state.hoverBlockId = null;
               state.flash = null;
-              state.anchorPickingBlockId = null;
+              state.anchorPicking = null;
             });
             resetHistory();
           },
 
           loadWorkbook: (loaded) => {
             set((state) => {
-              state.workbook = loaded;
+              // 구 워크북 정규화: 코드 블록마다 outputs ≥ 1, spill src 태그 이관 (부록 D.1)
+              state.workbook = normalizeWorkbook(loaded);
               state.activeSheetId = loaded.sheets[0]?.id ?? "";
               state.selection = null;
               // 이전 워크북의 transient 상태(실행 중·dirty 등) 정리 (§M7.5)
@@ -475,7 +548,7 @@ export const createWorkbookStore = () => {
               state.lastEditorBlockId = null;
               state.hoverBlockId = null;
               state.flash = null;
-              state.anchorPickingBlockId = null;
+              state.anchorPicking = null;
             });
             resetHistory();
           },
@@ -497,7 +570,7 @@ export const createWorkbookStore = () => {
             }
             const id = newId();
             set((state) => {
-              state.workbook.pyBlocks.push({
+              const block: PyBlock = {
                 id,
                 sheetId,
                 anchor,
@@ -506,48 +579,71 @@ export const createWorkbookStore = () => {
                 includeIndex: "auto",
                 // 마크다운 블록은 실행되지 않고 셀에 아무것도 쓰지 않는다 (앵커 = 위치·목차 대상)
                 ...(kind === "markdown" ? { kind, markdown: "" } : {}),
-              });
+              };
+              normalizeBlock(block); // 코드 블록은 출력 1개로 시작한다
+              state.workbook.pyBlocks.push(block);
             });
             return id;
           },
 
           setBlockAnchor: (id, anchor, sheetId) => {
-            const st = get();
-            const block = st.workbook.pyBlocks.find((b) => b.id === id);
+            // 레거시 경로: outputs[0]이 곧 블록 앵커다 (부록 D.1)
+            const block = get().workbook.pyBlocks.find((b) => b.id === id);
             if (!block) return "블록을 찾을 수 없습니다";
-            const targetSheetId = sheetId ?? block.sheetId;
+            const outputId = block.outputs?.[0]?.id;
+            if (!outputId) return "출력을 찾을 수 없습니다";
+            return get().setOutputAnchor(id, outputId, { sheetId, r: anchor.r, c: anchor.c });
+          },
+
+          setOutputAnchor: (blockId, outputId, target) => {
+            const st = get();
+            const block = st.workbook.pyBlocks.find((b) => b.id === blockId);
+            if (!block) return "블록을 찾을 수 없습니다";
+            const binding = block.outputs?.find((o) => o.id === outputId);
+            if (!binding) return "출력을 찾을 수 없습니다";
+            const targetSheetId = target.sheetId ?? binding.sheetId ?? block.sheetId;
             const sheet = st.workbook.sheets.find((s) => s.id === targetSheetId);
             if (!sheet) return "시트를 찾을 수 없습니다";
+            const currentSheetId = binding.sheetId ?? block.sheetId;
             if (
-              targetSheetId === block.sheetId &&
-              block.anchor.r === anchor.r &&
-              block.anchor.c === anchor.c
+              targetSheetId === currentSheetId &&
+              binding.anchor.r === target.r &&
+              binding.anchor.c === target.c
             ) {
               return null; // 제자리
             }
-            const conflict = checkSpillConflict(sheet, st.workbook.pyBlocks, id, anchor, [
-              1, 1,
-            ]);
+            const tag = srcTag(blockId, outputId);
+            const conflict = checkSpillConflict(sheet, st.workbook.pyBlocks, tag, target, [1, 1]);
             if (conflict) return conflict;
-            const cell = sheet.cells[cellKey(anchor.r, anchor.c)];
-            // 앵커 셀은 블록 소유라 checkSpillConflict가 봐주지만, 재지정은 빈 셀에만 허용한다
+            const cell = sheet.cells[cellKey(target.r, target.c)];
+            // 앵커 셀은 출력 소유라 checkSpillConflict가 봐주지만, 재지정은 빈 셀에만 허용한다
             if (cell && !cell.src && cell.v !== null && cell.v !== "") {
-              return `비어 있지 않은 셀(${colToLetter(anchor.c)}${anchor.r + 1})과 겹칩니다`;
+              return `비어 있지 않은 셀(${colToLetter(target.c)}${target.r + 1})과 겹칩니다`;
             }
             set((state) => {
-              const b = state.workbook.pyBlocks.find((x) => x.id === id);
-              if (!b) return;
-              const from = state.workbook.sheets.find((s) => s.id === b.sheetId);
-              if (from) {
-                for (const key of Object.keys(from.cells)) {
-                  if (from.cells[key].src === id) delete from.cells[key];
+              const b = state.workbook.pyBlocks.find((x) => x.id === blockId);
+              const o = b?.outputs?.find((x) => x.id === outputId);
+              if (!b || !o) return;
+              clearSpillCells(state.workbook, blockId, outputId);
+              if (o.last?.spillRange) delete o.last.spillRange; // 옛 위치의 spill 테두리 제거
+              o.anchor = { r: target.r, c: target.c };
+              if (b.outputs![0].id === outputId) {
+                // 블록 시트가 따라 움직인다 — 다른 출력은 원래 시트에 남긴다
+                if (targetSheetId !== b.sheetId) {
+                  for (const other of b.outputs!) {
+                    if (other.id !== outputId) other.sheetId ??= b.sheetId;
+                  }
+                  b.sheetId = targetSheetId;
                 }
+                delete o.sheetId;
+              } else if (targetSheetId === b.sheetId) {
+                delete o.sheetId;
+              } else {
+                o.sheetId = targetSheetId;
               }
-              b.sheetId = targetSheetId;
-              b.anchor = { r: anchor.r, c: anchor.c };
-              if (b.last?.spillRange) delete b.last.spillRange; // 옛 위치의 spill 테두리 제거
-              state.dirtyBlocks[id] = true;
-              state.anchorPickingBlockId = null;
+              syncLegacy(b);
+              state.dirtyBlocks[blockId] = true;
+              state.anchorPicking = null;
             });
             return null;
           },
@@ -563,11 +659,9 @@ export const createWorkbookStore = () => {
               const b = state.workbook.pyBlocks.find((x) => x.id === otherId);
               if (!a || !b) return;
               for (const blk of [a, b]) {
-                const sheet = state.workbook.sheets.find((s) => s.id === blk.sheetId);
-                if (sheet) {
-                  for (const key of Object.keys(sheet.cells)) {
-                    if (sheet.cells[key].src === blk.id) delete sheet.cells[key];
-                  }
+                clearSpillCells(state.workbook, blk.id);
+                for (const o of blk.outputs ?? []) {
+                  if (o.last?.spillRange) delete o.last.spillRange;
                 }
                 if (blk.last?.spillRange) delete blk.last.spillRange;
                 state.dirtyBlocks[blk.id] = true;
@@ -575,10 +669,21 @@ export const createWorkbookStore = () => {
               // draft 별칭을 피하려고 평범한 값으로 먼저 복사한다
               const posA = { sheetId: a.sheetId, anchor: { ...a.anchor } };
               const posB = { sheetId: b.sheetId, anchor: { ...b.anchor } };
+              // 다른 시트로 옮기는 블록의 나머지 출력은 원래 시트에 남는다
+              for (const blk of [a, b]) {
+                for (const o of (blk.outputs ?? []).slice(1)) o.sheetId ??= blk.sheetId;
+              }
               a.sheetId = posB.sheetId;
-              a.anchor = posB.anchor;
+              a.anchor = { ...posB.anchor };
               b.sheetId = posA.sheetId;
-              b.anchor = posA.anchor;
+              b.anchor = { ...posA.anchor };
+              for (const blk of [a, b]) {
+                const first = blk.outputs?.[0];
+                if (first) {
+                  first.anchor = { ...blk.anchor };
+                  delete first.sheetId;
+                }
+              }
             });
             return otherId;
           },
@@ -587,13 +692,7 @@ export const createWorkbookStore = () => {
             set((state) => {
               const idx = state.workbook.pyBlocks.findIndex((b) => b.id === id);
               if (idx < 0) return;
-              const block = state.workbook.pyBlocks[idx];
-              const sheet = state.workbook.sheets.find((s) => s.id === block.sheetId);
-              if (sheet) {
-                for (const key of Object.keys(sheet.cells)) {
-                  if (sheet.cells[key].src === id) delete sheet.cells[key];
-                }
-              }
+              clearSpillCells(state.workbook, id); // 다른 시트에 놓인 출력까지
               state.workbook.pyBlocks.splice(idx, 1);
               delete state.runningBlocks[id];
               delete state.dirtyBlocks[id];
@@ -601,7 +700,7 @@ export const createWorkbookStore = () => {
               if (state.selectedBlockId === id) state.selectedBlockId = null;
               if (state.lastEditorBlockId === id) state.lastEditorBlockId = null;
               if (state.hoverBlockId === id) state.hoverBlockId = null;
-              if (state.anchorPickingBlockId === id) state.anchorPickingBlockId = null;
+              if (state.anchorPicking?.blockId === id) state.anchorPicking = null;
             }),
 
           setBlockCode: (id, code) =>
@@ -610,22 +709,96 @@ export const createWorkbookStore = () => {
               if (block && block.code !== code) block.code = code;
             }),
 
-          setBlockOutputMode: (id, mode) =>
+          setBlockOutputMode: (id, mode) => {
+            const outputId = get().workbook.pyBlocks.find((b) => b.id === id)?.outputs?.[0]?.id;
+            if (outputId) get().setOutputMode(id, outputId, mode);
+          },
+
+          setBlockOutput: (id, patch) => {
+            const outputId = get().workbook.pyBlocks.find((b) => b.id === id)?.outputs?.[0]?.id;
+            if (outputId) get().setOutputSelection(id, outputId, patch);
+          },
+
+          addOutput: (blockId) => {
+            const st = get();
+            const block = st.workbook.pyBlocks.find((b) => b.id === blockId);
+            if (!block || block.kind === "markdown") return null;
+            const sheet = st.workbook.sheets.find((s) => s.id === block.sheetId);
+            if (!sheet) return null;
+            // 기존 출력 영역 오른쪽 두 칸부터 빈 셀을 찾는다
+            let c = block.anchor.c;
+            for (const o of block.outputs ?? []) {
+              if ((o.sheetId ?? block.sheetId) !== sheet.id) continue;
+              c = Math.max(c, Math.max(o.anchor.c, o.last?.spillRange?.c1 ?? o.anchor.c) + 2);
+            }
+            const r = block.anchor.r;
+            const limit = c + 200;
+            while (c < limit && cellTaken(sheet, st.workbook.pyBlocks, r, c)) c++;
+            const id = newId();
             set((state) => {
-              const block = state.workbook.pyBlocks.find((b) => b.id === id);
-              // 객체→값 전환의 spill 충돌은 다음 실행에서 검사한다 (§2.3.6, M5)
-              if (block) block.outputMode = mode;
+              const b = state.workbook.pyBlocks.find((x) => x.id === blockId);
+              if (!b) return;
+              (b.outputs ??= []).push({
+                id,
+                anchor: { r, c },
+                mode: "values",
+                includeIndex: "auto",
+              });
+              state.dirtyBlocks[blockId] = true;
+            });
+            return id;
+          },
+
+          removeOutput: (blockId, outputId) =>
+            set((state) => {
+              const b = state.workbook.pyBlocks.find((x) => x.id === blockId);
+              if (!b?.outputs || b.outputs.length <= 1) return; // 마지막 출력은 남긴다
+              const i = b.outputs.findIndex((o) => o.id === outputId);
+              if (i < 0) return;
+              clearSpillCells(state.workbook, blockId, outputId);
+              b.outputs.splice(i, 1);
+              syncLegacy(b);
+              state.dirtyBlocks[blockId] = true;
             }),
 
-          setBlockOutput: (id, patch) =>
+          setOutputSelection: (blockId, outputId, patch) =>
             set((state) => {
-              const block = state.workbook.pyBlocks.find((b) => b.id === id);
-              if (!block) return;
-              const next: OutputSelection = { ...block.output, ...patch };
+              const b = state.workbook.pyBlocks.find((x) => x.id === blockId);
+              const o = b?.outputs?.find((x) => x.id === outputId);
+              if (!b || !o) return;
+              const next: OutputSelection = { ...o.selection, ...patch };
               for (const k of Object.keys(next) as (keyof OutputSelection)[]) {
                 if (next[k] === undefined) delete next[k];
               }
-              block.output = Object.keys(next).length > 0 ? next : undefined;
+              o.selection = Object.keys(next).length > 0 ? next : undefined;
+              syncLegacy(b);
+            }),
+
+          setOutputMode: (blockId, outputId, mode) =>
+            set((state) => {
+              const b = state.workbook.pyBlocks.find((x) => x.id === blockId);
+              const o = b?.outputs?.find((x) => x.id === outputId);
+              // 객체→값 전환의 spill 충돌은 다음 실행에서 검사한다 (§2.3.6, M5)
+              if (!b || !o) return;
+              o.mode = mode;
+              syncLegacy(b);
+            }),
+
+          setOutputIncludeIndex: (blockId, outputId, value) =>
+            set((state) => {
+              const b = state.workbook.pyBlocks.find((x) => x.id === blockId);
+              const o = b?.outputs?.find((x) => x.id === outputId);
+              if (!b || !o) return;
+              o.includeIndex = value;
+              syncLegacy(b);
+            }),
+
+          setOutputLabel: (blockId, outputId, label) =>
+            set((state) => {
+              const o = state.workbook.pyBlocks
+                .find((x) => x.id === blockId)
+                ?.outputs?.find((x) => x.id === outputId);
+              if (o) o.label = label.trim() === "" ? undefined : label;
             }),
 
           setBlockMarkdown: (id, markdown) =>
@@ -653,28 +826,45 @@ export const createWorkbookStore = () => {
               for (const b of state.workbook.pyBlocks) b.collapsed = collapsed || undefined;
             }),
 
-          applyBlockResult: (blockId, cells, opts) =>
+          applyOutputResults: (blockId, results) =>
             set((state) => {
               const block = state.workbook.pyBlocks.find((b) => b.id === blockId);
               if (!block) return;
-              const sheet = state.workbook.sheets.find((s) => s.id === block.sheetId);
-              if (!sheet) return;
-              if (opts?.clearPrevious) {
-                for (const key of Object.keys(sheet.cells)) {
-                  if (sheet.cells[key].src === blockId) delete sheet.cells[key];
+              for (const res of results) {
+                const binding = block.outputs?.find((o) => o.id === res.outputId);
+                if (!binding) continue;
+                const sheet = state.workbook.sheets.find(
+                  (s) => s.id === (binding.sheetId ?? block.sheetId),
+                );
+                if (!sheet) continue;
+                const tag = srcTag(blockId, binding.id);
+                if (res.clearPrevious) {
+                  for (const key of Object.keys(sheet.cells)) {
+                    if (sheet.cells[key].src === tag) delete sheet.cells[key];
+                  }
                 }
+                res.cells.forEach((row, i) =>
+                  row.forEach((cell, j) => {
+                    const r = binding.anchor.r + i;
+                    const c = binding.anchor.c + j;
+                    sheet.cells[cellKey(r, c)] = { ...cell, src: tag };
+                    if (r >= sheet.rowCount) sheet.rowCount = r + 1;
+                    if (c >= sheet.colCount) sheet.colCount = c + 1;
+                  }),
+                );
+                if (res.last) binding.last = res.last;
               }
-              cells.forEach((row, i) =>
-                row.forEach((cell, j) => {
-                  const r = block.anchor.r + i;
-                  const c = block.anchor.c + j;
-                  sheet.cells[cellKey(r, c)] = { ...cell, src: blockId };
-                  if (r >= sheet.rowCount) sheet.rowCount = r + 1;
-                  if (c >= sheet.colCount) sheet.colCount = c + 1;
-                }),
-              );
-              if (opts?.last) block.last = opts.last;
+              syncLegacy(block);
             }),
+
+          applyBlockResult: (blockId, cells, opts) => {
+            const outputId = get().workbook.pyBlocks.find((b) => b.id === blockId)?.outputs?.[0]
+              ?.id;
+            if (!outputId) return;
+            get().applyOutputResults(blockId, [
+              { outputId, cells, clearPrevious: opts?.clearPrevious, last: opts?.last },
+            ]);
+          },
 
           setBlockRunning: (id, running) =>
             set((state) => {
@@ -737,9 +927,14 @@ export const createWorkbookStore = () => {
               state.lastEditorBlockId = id;
             }),
 
-          setAnchorPicking: (id) =>
+          setAnchorPicking: (target) =>
             set((state) => {
-              state.anchorPickingBlockId = id;
+              state.anchorPicking = target;
+            }),
+
+          setTocOpen: (open) =>
+            set((state) => {
+              state.tocOpen = open;
             }),
         };
       }),

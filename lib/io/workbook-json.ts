@@ -1,6 +1,7 @@
 // .pygrid.json 저장/열기 — 설계서 §1.5·§3.4. 스키마는 types/workbook.ts §3.1.
 
-import type { PyBlock, Workbook } from "@/types/workbook";
+import { normalizeWorkbook } from "@/lib/grid/outputs";
+import type { OutputBinding, PyBlock, Workbook } from "@/types/workbook";
 
 export const WARN_BYTES = 50 * 1024 * 1024;
 export const MAX_BYTES = 100 * 1024 * 1024;
@@ -16,12 +17,18 @@ export const checkSizeGuard = (bytes: number): SizeVerdict =>
  * 파일로 가져갈 수 없고, 열기 후 블록 재실행으로 복원된다.
  */
 export function serializeWorkbook(wb: Workbook): string {
+  const dropBlob = <T extends { last?: { imageBlobId?: string } }>(x: T): T => {
+    if (!x.last?.imageBlobId) return x;
+    const { imageBlobId: _drop, ...last } = x.last;
+    return { ...x, last };
+  };
   const clean: Workbook = {
     ...wb,
     pyBlocks: wb.pyBlocks.map((b): PyBlock => {
-      if (!b.last?.imageBlobId) return b;
-      const { imageBlobId: _drop, ...last } = b.last;
-      return { ...b, last };
+      const block = dropBlob(b);
+      return block.outputs
+        ? { ...block, outputs: block.outputs.map((o): OutputBinding => dropBlob(o)) }
+        : block;
     }),
   };
   return JSON.stringify(clean);
@@ -64,8 +71,8 @@ export function parseWorkbookJson(text: string): Workbook {
   ) {
     throw new Error("워크북 파일이 손상되었습니다 (필수 필드 누락)");
   }
-  // 선택 필드 기본값 보정
-  return {
+  // 선택 필드 기본값 보정 + 다중 출력 정규화 (구 파일의 src 태그 이관 포함)
+  return normalizeWorkbook({
     ...wb,
     version: 1,
     pyBlocks: Array.isArray(wb.pyBlocks) ? wb.pyBlocks : [],
@@ -77,7 +84,7 @@ export function parseWorkbookJson(text: string): Workbook {
     },
     createdAt: wb.createdAt ?? new Date().toISOString(),
     updatedAt: wb.updatedAt ?? new Date().toISOString(),
-  } as Workbook;
+  } as Workbook);
 }
 
 /** Blob + anchor 다운로드 (브라우저 전용) */

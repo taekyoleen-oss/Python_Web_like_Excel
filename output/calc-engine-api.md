@@ -6,16 +6,20 @@
 
 ```ts
 resolveRefs(refs, ownSheetId, resolveSheet): SheetRange[]   // 잘못된 참조는 건너뜀
-buildGraph(blocks, resolved, spills): CalcGraph             // B의 참조 ∩ A의 spill(값 모드)/앵커(객체 모드)
+buildGraph(blocks, resolved, spills, areas?): CalcGraph     // B의 참조 ∩ A의 출력 영역(areas 전부 / spill / 앵커)
 calcOrder(blocks, sheetOrder, graph): { order, cycle }      // Kahn, 동순위 (시트 순, 앵커 r, c)
 dirtyPropagation(resolved, graph, editedRanges, editedBlockIds): Set<blockId>
 ```
 
-- `WorkbookView` = `{ blocks: CalcBlock[], sheetOrder: string[], spills: Map<id, CellRange|undefined> }` — 호출 시점 스토어 상태의 평면 사본. `CalcBlock` = PyBlock의 `{id, sheetId, anchor, code, outputMode, includeIndex, output?, kind?}` 부분집합.
+- `WorkbookView` = `{ blocks: CalcBlock[], sheetOrder: string[], spills: Map<id, CellRange|undefined>, areas?: Map<id, OutputArea[]> }` — 호출 시점 스토어 상태의 평면 사본. `CalcBlock` = PyBlock의 `{id, sheetId, anchor, code, outputMode, includeIndex, output?, kind?, outputs?}` 부분집합.
 - **마크다운 블록 제외(v1.1)**: `kind === "markdown"`인 블록은 실행 대상이 아니다(`isExecutable(b)`). `buildGraph`가 노드에서 빼므로 **의존 대상도 되지 못하고**(다른 블록이 그 앵커를 참조해도 의존이 생기지 않음), `calcOrder`의 `order`·`cycle`, `dirtyPropagation`의 결과, `runAll`/`runBlocks`/`notifyEdit` 큐에도 들어가지 않는다. `analyze`·`run` 메시지가 워커로 나가지 않고 `onBusy`/`onResult`도 호출되지 않는다. → grid-ui는 마크다운 카드에 실행 배지·`#BUSY!`·오류 셀을 표시하지 않는다.
   - `dirtyPropagation`은 `graph.deps`에 없는 id(마크다운 등)를 `editedBlockIds`·`resolved` 양쪽에서 걸러낸다 — 마크다운 본문을 편집해도 dirty 배지가 생기지 않는다.
 - **출력 선택 전달(v1.1)**: `block.output`(`OutputSelection`)은 `client.run(..., timeoutSec, output)`의 마지막 인자로 그대로 넘어간다. 의미론은 `output/runtime-protocol.md` "출력 선택 계약".
 - 값 모드 블록에 기록된 spill이 없으면(첫 실행 전 등) **앵커 1×1**이 의존 대상이 된다.
+- **다중 출력(v1.2)**: `view.areas`에 그 블록의 영역이 하나라도 있으면 **그 영역 전부**가 의존 대상이며 `spills`는 무시된다
+  (`OutputArea = CellRange & { sheetId? }`, `sheetId` 생략 시 블록 시트). B의 참조가 A의 **어느 한 영역**과 겹치면 B는 A에 의존한다.
+  areas가 없거나 빈 배열이면 기존 규칙(값 모드 spill / 객체 모드 앵커) 그대로다. 영역을 채우는 쪽은 grid-ui
+  (값 모드 출력 = 마지막 spill 범위 또는 앵커 1×1, 객체 모드 출력 = 앵커 1×1).
 - **순환**: 순환에 속한 블록 전부 `cycle`, `order`에서 제외. 순환의 *하위*(순환을 참조하지만 스스로는 순환이 아닌) 블록은 순환 의존을 무시하고 `order`에 남는다 — 실행 시 이전 spill 값 또는 xl() 안전망(RuntimeError)으로 진행.
 - **변수 공유 한계**(§2.4): `xl()` 없이 변수로만 이어진 블록은 의존성으로 추적되지 않는다. 순서 보장은 `runAll`(전 블록 calcOrder)에서만 — UI 안내 문구 필요.
 
@@ -44,6 +48,9 @@ interface CalcHost {
   resolveSheet(name): string | undefined;          // 시트 이름 → id
   onBusy(blockId): void;                           // 실행 대기 → '#BUSY!' 표시
   onResult(blockId, payload: RunPayload, cells: Cell[][]|null, spill: CellRange|null): void;
+  onOutputs?(blockId, payload: RunPayload, items: Array<{     // 다중 출력 (선택 구현)
+    outputId: string; item: OutputItem; cells: Cell[][]|null; spill: CellRange|null;
+  }>): void;
 }
 ```
 
@@ -60,3 +67,20 @@ interface CalcHost {
 | `WorkerError` | 재부트 등 요청 거부 메시지 | client.run reject (타임아웃→재부트 포함) |
 
 그 외 errorType은 워커 발신 Python 예외 클래스명(`errors-ko.ts` 매핑 대상).
+
+## `onOutputs` 규약 (다중 출력, v1.2)
+
+`block.outputs?.length`가 있고 **호스트가 `onOutputs`를 구현했을 때만** 이 콜백이 쓰인다 —
+그 실행에서는 `onResult`가 호출되지 않는다(둘 다 호출되는 경우는 없다). `onOutputs` 미구현 호스트는
+레거시 단일 출력 경로(`onResult`, `run`에 `outputs` 미전송)로 그대로 동작한다.
+
+- 엔진은 `block.outputs`를 `OutputRequest[]`(`id`/`mode`/`includeIndex`/`selection`)로 변환해 `client.run(..., outputs)`에 넘긴다.
+- `items[i]`는 워커가 돌려준 `payload.outputs` 순서 그대로다. `outputId`로 `block.outputs[]`의 바인딩을 찾는다.
+  - **값 모드 성공**: `cells = toCells(item.cells)`, `spill = spillRange(바인딩 anchor, 행, 열)`.
+  - 객체 모드 성공·출력 단위 실패: `cells`/`spill` 모두 `null`(카드에 표시하거나 `#PYTHON!`).
+- **실행 자체가 실패**하면(`payload.ok === false` — 코드 본문 오류, analyze/ref 오류, 타임아웃·재부트) `items`는 **빈 배열**이다.
+  그 블록의 **모든 출력**에 `payload`의 오류를 표시하는 것은 grid-ui 몫(바인딩 목록은 스토어가 갖고 있다).
+- **스토어 트랜잭션은 grid-ui 몫**: spill 충돌 검사(`#SPILL!`), 이전 영역 제거, `src=blockId` 기록,
+  출력 여러 개를 **한 트랜잭션 = 한 undo 단계**로 반영한다. 서로 다른 출력끼리 겹치는 경우의 판정도 grid-ui(스토어)에서 한다 —
+  엔진은 겹침을 검사하지 않고 계산된 `spill` 범위만 넘긴다.
+- 다음 실행의 의존성 그래프가 맞으려면 grid-ui가 반영 후 `WorkbookView.areas`를 갱신해야 한다.

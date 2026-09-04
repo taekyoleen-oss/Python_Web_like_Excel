@@ -70,6 +70,32 @@ const runConvert = (
   ) as ConvertResult;
 };
 
+interface MultiResult {
+  ok: boolean;
+  items?: (ConvertResult & { id: string })[];
+  etype?: string;
+  msg?: string;
+}
+
+interface OutReq {
+  id: string;
+  mode?: "values" | "object";
+  includeIndex?: "auto" | "always" | "never";
+  selection?: OutputSelection;
+}
+
+/** 다중 출력: 워커와 같은 호출 형태 — 요청 배열을 JSON 문자열로 넘긴다 */
+const runMulti = (code: string, outputs: OutReq[]): MultiResult => {
+  py.globals.set("_pygrid_code", code);
+  py.globals.set(
+    "_pygrid_outputs",
+    JSON.stringify(outputs.map((o) => ({ mode: "values", includeIndex: "auto", ...o }))),
+  );
+  return JSON.parse(
+    py.runPython("_pygrid_run_convert_multi(_pygrid_code, _pygrid_outputs)") as string,
+  ) as MultiResult;
+};
+
 const extractRefs = (code: string): { ok: boolean; refs?: string[]; message?: string } => {
   py.globals.set("_pygrid_code", code);
   return JSON.parse(py.runPython("_pygrid_extract_refs(_pygrid_code)") as string);
@@ -482,4 +508,105 @@ row("출력 선택 — 객체 모드 preview·shape에도 같은 선택 반영 (
   expect(r.preview?.columns).toEqual(["b", "a"]);
   expect(r.preview?.shape).toEqual([3, 2]);
   expect(r.preview?.rows).toHaveLength(3);
+});
+
+// ── 다중 출력(v1.2): 코드 1회 실행 · 출력별 변환 · 출력 단위 실패 ──
+
+row("다중 출력 — 본문은 1회만 실행, 출력마다 독립 선택 (#20)", () => {
+  const code = [
+    "import pandas as pd",
+    'mo_calls = globals().get("mo_calls", 0) + 1',
+    'mo_df = pd.DataFrame({"a": [1, 2], "b": [3, 4]})',
+    "mo_total = 10",
+    "mo_total",
+  ].join("\n");
+  py.runPython("globals().pop('mo_calls', None)");
+  const r = runMulti(code, [
+    { id: "o1", selection: { variable: "mo_df" } },
+    { id: "o2", selection: { variable: "mo_total" } },
+    { id: "o3" }, // 선택 없음 → 마지막 표현식
+  ]);
+  expect(r.ok).toBe(true);
+  expect(r.items?.map((i) => i.id)).toEqual(["o1", "o2", "o3"]); // 요청 순서 유지
+  expect(pyEval("mo_calls")).toBe(1); // 출력이 3개여도 본문 실행은 1회
+  expect(r.items?.[0].cells).toEqual([
+    [
+      { v: "a", t: "s" },
+      { v: "b", t: "s" },
+    ],
+    [
+      { v: 1, t: "n" },
+      { v: 3, t: "n" },
+    ],
+    [
+      { v: 2, t: "n" },
+      { v: 4, t: "n" },
+    ],
+  ]);
+  expect(r.items?.[1].cells).toEqual([[{ v: 10, t: "n" }]]);
+  expect(r.items?.[2].cells).toEqual([[{ v: 10, t: "n" }]]);
+});
+
+row("다중 출력 — 한 출력의 실패(없는 변수)는 그 출력만 (#21)", () => {
+  const r = runMulti("mo_ok = 7\nmo_ok", [
+    { id: "bad", selection: { variable: "없는변수" } },
+    { id: "good", selection: { variable: "mo_ok" } },
+  ]);
+  expect(r.ok).toBe(true); // 코드 본문은 성공 → run 전체는 성공
+  expect(r.items?.[0].ok).toBe(false);
+  expect(r.items?.[0].etype).toBe("NameError");
+  expect(r.items?.[0].msg).toContain("없는변수");
+  expect(r.items?.[1].ok).toBe(true);
+  expect(r.items?.[1].cells).toEqual([[{ v: 7, t: "n" }]]);
+});
+
+row("다중 출력 — 값 모드 이미지 실패는 그 출력만, 객체 모드 출력은 PNG (#22)", () => {
+  const code = [
+    "import matplotlib.pyplot as plt",
+    "mo_fig, mo_ax = plt.subplots()",
+    "mo_ax.plot([1, 2], [3, 4])",
+    "mo_n = 5",
+    "mo_n",
+  ].join("\n");
+  const r = runMulti(code, [
+    { id: "img_values", mode: "values", selection: { variable: "mo_fig" } },
+    { id: "img_card", mode: "object", selection: { variable: "mo_fig" } },
+    { id: "num" },
+  ]);
+  expect(r.ok).toBe(true);
+  expect(r.items?.[0].ok).toBe(false);
+  expect(r.items?.[0].etype).toBe("PyGridImageError");
+  expect(r.items?.[0].msg).toBe("이미지는 값으로 펼칠 수 없습니다");
+  expect(r.items?.[1].ok).toBe(true);
+  expect(r.items?.[1].kind).toBe("image");
+  expect(r.items?.[1].pngB64?.startsWith("iVBORw0KGgo")).toBe(true);
+  expect(r.items?.[2].cells).toEqual([[{ v: 5, t: "n" }]]);
+});
+
+row("다중 출력 — columns·rowLimit는 출력마다 따로 적용 (#20)", () => {
+  const code = [
+    "import pandas as pd",
+    'mo_wide = pd.DataFrame({"a": range(5), "b": range(5), "c": range(5)})',
+    "None",
+  ].join("\n");
+  const r = runMulti(code, [
+    { id: "x", selection: { variable: "mo_wide", columns: ["c", "a"], rowLimit: 2 } },
+    { id: "y", selection: { variable: "mo_wide", rowLimit: 1 } },
+    { id: "z", mode: "object", selection: { variable: "mo_wide", columns: ["b"] } },
+  ]);
+  expect(r.items?.[0].shape).toEqual([3, 2]); // 헤더 + 2행, 요청 열 순서
+  expect(r.items?.[0].cells?.[0]).toEqual([
+    { v: "c", t: "s" },
+    { v: "a", t: "s" },
+  ]);
+  expect(r.items?.[1].shape).toEqual([2, 3]); // 같은 변수, 다른 선택
+  expect(r.items?.[2].preview?.columns).toEqual(["b"]);
+});
+
+row("다중 출력 — 코드 본문 오류는 실행 전체 실패 (items 없음)", () => {
+  const r = runMulti('raise ValueError("폭발")', [{ id: "a" }, { id: "b" }]);
+  expect(r.ok).toBe(false);
+  expect(r.etype).toBe("ValueError");
+  expect(r.msg).toBe("폭발");
+  expect(r.items).toBeUndefined();
 });

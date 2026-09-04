@@ -228,14 +228,64 @@ def _pygrid_run_convert(code, output_mode, include_index, output_json=None):
         value = _pygrid_exec_capture(code, (output or {}).get("variable"))
         value = _pygrid_select_output(value, output)
     except BaseException as e:  # KeyboardInterrupt·출력 변수 NameError 포함
-        return json.dumps(
-            {"ok": False, "etype": type(e).__name__, "msg": str(e), "tb": _pygrid_format_exc(e)},
-            ensure_ascii=False,
-        )
+        return json.dumps(_pygrid_fail(e), ensure_ascii=False)
     try:
         return json.dumps(_pygrid_convert(value, output_mode, include_index), ensure_ascii=False)
     except Exception as e:  # 변환 자체의 예상 밖 실패
-        return json.dumps(
-            {"ok": False, "etype": "ConversionError", "msg": str(e), "tb": _pygrid_format_exc(e)},
-            ensure_ascii=False,
-        )
+        return json.dumps(_pygrid_fail(e, "ConversionError"), ensure_ascii=False)
+
+
+def _pygrid_fail(e, etype=None):
+    """예외 → 실패 dict(JSON-safe). etype을 주면 합성 오류 이름으로 덮어쓴다."""
+    return {
+        "ok": False,
+        "etype": etype or type(e).__name__,
+        "msg": str(e),
+        "tb": _pygrid_format_exc(e),
+    }
+
+
+def _pygrid_convert_one(last, req):
+    """출력 요청 하나 → 결과 dict(+id). **이 출력만의** 실패는 여기서 잡는다.
+
+    다른 출력은 계속 진행한다(경계 케이스 로그 #20). 중단(KeyboardInterrupt)만
+    위로 올려 실행 전체 실패로 만든다.
+    """
+    sel = req.get("selection") or {}
+    try:
+        value = last
+        variable = sel.get("variable")
+        if variable:
+            g = globals()
+            if variable not in g:
+                raise NameError(f"출력 변수 '{variable}'가 정의되지 않았습니다")
+            value = g[variable]
+        value = _pygrid_select_output(value, sel)
+    except KeyboardInterrupt:
+        raise
+    except BaseException as e:
+        return dict(_pygrid_fail(e), id=req.get("id"))
+    try:
+        out = _pygrid_convert(value, req.get("mode", "object"), req.get("includeIndex", "auto"))
+    except Exception as e:  # 변환 자체의 예상 밖 실패 (KeyboardInterrupt는 위로)
+        out = _pygrid_fail(e, "ConversionError")
+    out["id"] = req.get("id")
+    return out
+
+
+def _pygrid_run_convert_multi(code, outputs_json):
+    """다중 출력: 본문을 **1회만** 실행하고 요청마다 따로 변환한다.
+
+    반환(JSON 문자열):
+      성공 {"ok": true, "items": [{"id", ...변환 결과 또는 출력 단위 실패}]}
+      실패 {"ok": false, "etype", "msg", "tb"}  — 본문 실행 실패(전체 run 실패)
+    """
+    import json
+
+    requests = json.loads(outputs_json) if outputs_json else []
+    try:
+        last = _pygrid_exec_capture(code)  # variable 선택은 출력마다 따로 적용한다
+        items = [_pygrid_convert_one(last, req) for req in requests or []]
+    except BaseException as e:  # 본문 오류·중단 → 실행 전체 실패
+        return json.dumps(_pygrid_fail(e), ensure_ascii=False)
+    return json.dumps({"ok": True, "items": items}, ensure_ascii=False)

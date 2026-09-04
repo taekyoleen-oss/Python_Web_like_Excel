@@ -13,8 +13,8 @@ import {
   type SheetRange,
   type WorkbookView,
 } from "@/lib/runtime/calc-engine";
-import type { RunPayload } from "@/lib/runtime/protocol";
-import type { CellRange, OutputSelection } from "@/types/workbook";
+import type { OutputRequest, RunPayload } from "@/lib/runtime/protocol";
+import type { CellRange, OutputBinding, OutputSelection } from "@/types/workbook";
 
 const blk = (
   id: string,
@@ -215,11 +215,15 @@ describe("dirtyPropagation", () => {
 
 // ── RunCoordinator ───────────────────────────────────────
 
+type OutItems = Parameters<NonNullable<CalcHost["onOutputs"]>>[2];
+
 type HostEvent =
   | { kind: "busy"; id: string }
-  | { kind: "result"; id: string; payload: RunPayload; cells: unknown; spill: CellRange | null };
+  | { kind: "result"; id: string; payload: RunPayload; cells: unknown; spill: CellRange | null }
+  | { kind: "outputs"; id: string; payload: RunPayload; items: OutItems };
 
-function makeHost(cells: Record<string, { v: number; t: "n" }> = {}) {
+/** multi=false면 onOutputs 미구현 호스트(레거시 경로 검증용) */
+function makeHost(cells: Record<string, { v: number; t: "n" }> = {}, multi = true) {
   const events: HostEvent[] = [];
   const host: CalcHost = {
     getCell: (sheetId, r, c) => cells[`${sheetId}:${r}:${c}`],
@@ -227,18 +231,25 @@ function makeHost(cells: Record<string, { v: number; t: "n" }> = {}) {
     onBusy: (id) => events.push({ kind: "busy", id }),
     onResult: (id, payload, cellsOut, spill) =>
       events.push({ kind: "result", id, payload, cells: cellsOut, spill }),
+    ...(multi
+      ? {
+          onOutputs: (id: string, payload: RunPayload, items: OutItems) =>
+            events.push({ kind: "outputs", id, payload, items }),
+        }
+      : {}),
   };
   return { host, events };
 }
 
-function makeClient() {
+function makeClient(payload?: RunPayload) {
   const analyzeCalls: string[] = [];
   const runCalls: {
     blockId: string;
     snapshots: Record<string, unknown>;
     output?: OutputSelection;
+    outputs?: OutputRequest[];
   }[] = [];
-  const ok: RunPayload = {
+  const ok: RunPayload = payload ?? {
     ok: true,
     kind: "table",
     cells: [[{ v: 1, t: "n" }], [{ v: 2, t: "n" }]],
@@ -260,8 +271,9 @@ function makeClient() {
       _includeIndex?: string,
       _timeoutSec?: number,
       output?: OutputSelection,
+      outputs?: OutputRequest[],
     ) {
-      runCalls.push({ blockId, snapshots, output });
+      runCalls.push({ blockId, snapshots, output, outputs });
       return ok;
     },
   };
@@ -500,5 +512,157 @@ describe("마크다운 블록 제외", () => {
     await co.runBlocks(["M"], view);
     expect(runCalls).toEqual([]);
     expect(events).toEqual([]);
+  });
+});
+
+// ── 다중 출력(v1.2): areas 그래프 + onOutputs ─────────────
+
+describe("다중 출력", () => {
+  test("buildGraph: areas의 모든 영역이 의존 대상이고 spills를 이긴다", () => {
+    const blocks = [blk("A", { r: 0, c: 0 }), blk("B", { r: 20, c: 0 }), blk("C", { r: 30, c: 0 })];
+    const resolved = new Map([
+      ["A", []],
+      ["B", [sr(0, 7, 0, 7)]], // A의 2번째 영역(H1) → 의존
+      ["C", [sr(3, 0, 3, 0)]], // 옛 spill(A1:A10) 안이지만 areas 밖 → 비의존
+    ]);
+    const areas = new Map([
+      [
+        "A",
+        [
+          { r0: 0, c0: 0, r1: 1, c1: 1 }, // sheetId 생략 → 블록 시트
+          { r0: 0, c0: 7, r1: 0, c1: 7 },
+        ],
+      ],
+    ]);
+    const g = buildGraph(blocks, resolved, new Map([["A", range(0, 0, 9, 0)]]), areas);
+    expect(g.deps.get("B")!.has("A")).toBe(true);
+    expect(g.deps.get("C")!.size).toBe(0);
+  });
+
+  test("buildGraph: area의 sheetId가 있으면 그 시트 기준", () => {
+    const blocks = [blk("A", { r: 0, c: 0 }), blk("B", { r: 0, c: 0 }, "", { sheetId: "s2" })];
+    const resolved = new Map([
+      ["A", []],
+      ["B", [sr(4, 0, 4, 0, "s2")]],
+    ]);
+    const cross = buildGraph(
+      blocks,
+      resolved,
+      new Map(),
+      new Map([["A", [{ r0: 4, c0: 0, r1: 4, c1: 0, sheetId: "s2" }]]]),
+    );
+    expect(cross.deps.get("B")!.has("A")).toBe(true);
+    const own = buildGraph(
+      blocks,
+      resolved,
+      new Map(),
+      new Map([["A", [{ r0: 4, c0: 0, r1: 4, c1: 0 }]]]), // s1 기준 → 겹치지 않음
+    );
+    expect(own.deps.get("B")!.size).toBe(0);
+  });
+
+  const bindings: OutputBinding[] = [
+    { id: "o1", anchor: { r: 0, c: 0 }, mode: "values", includeIndex: "auto" },
+    {
+      id: "o2",
+      anchor: { r: 0, c: 7 },
+      mode: "object",
+      includeIndex: "auto",
+      selection: { variable: "fig" },
+    },
+    {
+      id: "o3",
+      anchor: { r: 4, c: 10 },
+      mode: "values",
+      includeIndex: "never",
+      selection: { variable: "MISSING" },
+    },
+  ];
+
+  const multiOk: RunPayload = {
+    ok: true,
+    kind: "table",
+    outputs: [
+      { id: "o1", ok: true, kind: "table", cells: [[{ v: "a", t: "s" }], [{ v: 1, t: "n" }]] },
+      { id: "o2", ok: true, kind: "image", shape: [1, 1] },
+      { id: "o3", ok: false, errorType: "NameError", message: "출력 변수가 정의되지 않았습니다" },
+    ],
+    stdout: "",
+    stderr: "",
+    durationMs: 1,
+  };
+
+  const multiView = (): WorkbookView => ({
+    blocks: [blk("A", { r: 0, c: 0 }, "1", { outputs: bindings })],
+    sheetOrder: ["s1"],
+    spills: new Map(),
+  });
+
+  test("execute: run에 outputs 전송, onOutputs만 호출(onResult 아님), 출력별 cells·spill", async () => {
+    const { client, runCalls } = makeClient(multiOk);
+    const { host, events } = makeHost();
+    await new RunCoordinator(client, host).runAll(multiView());
+
+    expect(runCalls[0].outputs).toEqual([
+      { id: "o1", mode: "values", includeIndex: "auto", selection: undefined },
+      { id: "o2", mode: "object", includeIndex: "auto", selection: { variable: "fig" } },
+      { id: "o3", mode: "values", includeIndex: "never", selection: { variable: "MISSING" } },
+    ]);
+    expect(events.filter((e) => e.kind === "result")).toEqual([]); // 레거시 콜백 미호출
+    const ev = events.find((e) => e.kind === "outputs");
+    expect(ev && ev.kind === "outputs" && ev.id).toBe("A");
+    const items = ev && ev.kind === "outputs" ? ev.items : [];
+    expect(items.map((i) => i.outputId)).toEqual(["o1", "o2", "o3"]);
+    // 값 모드 성공: 자기 앵커 기준 spill
+    expect(items[0].cells).toEqual([[{ v: "a", t: "s" }], [{ v: 1, t: "n" }]]);
+    expect(items[0].spill).toEqual(range(0, 0, 1, 0));
+    // 객체 모드 성공·출력 단위 실패: cells/spill 없음
+    expect(items[1].cells).toBeNull();
+    expect(items[1].spill).toBeNull();
+    expect(items[2].item.ok).toBe(false);
+    expect(items[2].cells).toBeNull();
+  });
+
+  test("execute: 실행 전체 실패 → onOutputs(payload 실패, items 빈 배열)", async () => {
+    const boom: RunPayload = {
+      ok: false,
+      errorType: "ValueError",
+      message: "BOOM",
+      traceback: "",
+      stdout: "",
+      stderr: "",
+      durationMs: 1,
+    };
+    const { client } = makeClient(boom);
+    const { host, events } = makeHost();
+    await new RunCoordinator(client, host).runAll(multiView());
+    const ev = events.find((e) => e.kind === "outputs");
+    expect(ev && ev.kind === "outputs" && ev.items).toEqual([]);
+    expect(ev && ev.kind === "outputs" && !ev.payload.ok && ev.payload.errorType).toBe("ValueError");
+    expect(events.filter((e) => e.kind === "result")).toEqual([]);
+  });
+
+  test("onOutputs 미구현 호스트 → 레거시 onResult 경로(outputs 미전송)", async () => {
+    const { client, runCalls } = makeClient();
+    const { host, events } = makeHost({}, false);
+    await new RunCoordinator(client, host).runAll(multiView());
+    expect(runCalls[0].outputs).toBeUndefined();
+    const res = events.find((e) => e.kind === "result");
+    expect(res && res.kind === "result" && res.spill).toEqual(range(0, 0, 1, 0));
+  });
+
+  test("outputs 없는 블록은 레거시 그대로 (onResult, outputs 미전송)", async () => {
+    const { client, runCalls } = makeClient();
+    const { host, events } = makeHost();
+    const view: WorkbookView = {
+      blocks: [blk("A", { r: 2, c: 3 }, "1")],
+      sheetOrder: ["s1"],
+      spills: new Map(),
+    };
+    await new RunCoordinator(client, host).runAll(view);
+    expect(runCalls[0].outputs).toBeUndefined();
+    expect(events.some((e) => e.kind === "outputs")).toBe(false);
+    const res = events.find((e) => e.kind === "result");
+    expect(res && res.kind === "result" && res.spill).toEqual(range(2, 3, 3, 3));
   });
 });

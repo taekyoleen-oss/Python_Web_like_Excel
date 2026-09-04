@@ -89,7 +89,7 @@ test("샘플 워크북(생명표) → 전체 실행 → lx spill + 히스토그�
             (b: any) => b.kind !== "markdown" && b.outputMode === "values",
           )?.id;
           return Object.values(st.workbook.sheets[0].cells).filter(
-            (c: any) => c.src === blockId,
+            (c: any) => typeof c.src === "string" && c.src.split(":")[0] === blockId,
           ).length;
         }),
       { timeout: 240_000, intervals: [2000] },

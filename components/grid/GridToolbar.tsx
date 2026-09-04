@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import {
   Article,
   ClipboardText,
+  ListBullets,
   Play,
   Plus,
   PushPin,
@@ -253,6 +254,7 @@ export default function GridToolbar() {
   );
   const [pasteDialogOpen, setPasteDialogOpen] = useState(false);
   const calcMode = useWorkbookStore((s) => s.workbook.calcMode);
+  const tocOpen = useWorkbookStore((s) => s.tocOpen);
 
   const store = () => useWorkbookStore.getState();
   const rowIndex = selection?.r0 ?? 0;
@@ -315,6 +317,16 @@ export default function GridToolbar() {
       </ToolButton>
       <ToolButton label="마크다운 블록 추가" onClick={addMarkdownAtSelection}>
         <Article />
+      </ToolButton>
+      <ToolButton
+        label={tocOpen ? "목차 패널 닫기" : "목차 패널 열기"}
+        active={tocOpen}
+        onClick={() => {
+          store().setTocOpen(!tocOpen);
+          void saveSettings({ tocOpen: !tocOpen });
+        }}
+      >
+        <ListBullets />
       </ToolButton>
       {/* 실행 버튼은 --primary 채움 (§4.6 Button) */}
       <Tooltip>

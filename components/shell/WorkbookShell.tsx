@@ -16,6 +16,7 @@ import SheetGrid from "@/components/grid/SheetGrid";
 import SheetTabs from "@/components/grid/SheetTabs";
 import BottomPanel from "@/components/panels/BottomPanel";
 import PythonPanel from "@/components/python/PythonPanel";
+import TocPanel from "@/components/python/TocPanel";
 import {
   loadWorkbookData,
   openWorkbookFile,
@@ -57,7 +58,7 @@ function useTier(): Tier {
   return tier;
 }
 
-type MobileView = "grid" | "python" | "bottom";
+type MobileView = "grid" | "python" | "toc" | "bottom";
 
 export default function WorkbookShell() {
   const saveStatus = useAutosave();
@@ -72,6 +73,17 @@ export default function WorkbookShell() {
   tierRef.current = tier;
   const [pyCollapsed, setPyCollapsed] = useState(false);
   const [mobileView, setMobileView] = useState<MobileView>("grid");
+  const tocOpen = useWorkbookStore((s) => s.tocOpen);
+  const closeToc = () => {
+    useWorkbookStore.getState().setTocOpen(false);
+    void saveSettings({ tocOpen: false });
+  };
+  // 3단 분할 크기 — 목차 패널이 열리면 그리드·Python이 비율대로 줄어든다 (합계 100%)
+  const TOC_SIZE = 16;
+  const pyHidden = tier === "lg" && pyCollapsed;
+  const rest = tocOpen ? 100 - TOC_SIZE : 100;
+  const gridSize = pyHidden ? rest : Math.round((splitRatio / 100) * rest);
+  const pySize = rest - gridSize;
 
   // 런타임 백그라운드 부트 (멱등) — 첫 페인트와 CDN 다운로드가 경쟁하지 않게 유휴 시점으로 미룬다
   useEffect(() => {
@@ -107,7 +119,7 @@ export default function WorkbookShell() {
     };
     const onKeyDown = (e: KeyboardEvent) => {
       // 출력 위치 지정 취소 (§ 앵커 재지정)
-      if (e.key === "Escape" && useWorkbookStore.getState().anchorPickingBlockId) {
+      if (e.key === "Escape" && useWorkbookStore.getState().anchorPicking) {
         useWorkbookStore.getState().setAnchorPicking(null);
         return;
       }
@@ -175,6 +187,7 @@ export default function WorkbookShell() {
         const settings = await loadSettings();
         if (settings?.splitRatio) setSplitRatio(settings.splitRatio);
         if (settings?.bottomPanelHeight) setBottomHeight(settings.bottomPanelHeight);
+        if (settings?.tocOpen) useWorkbookStore.getState().setTocOpen(true);
         const wb = settings?.lastWorkbookId
           ? await getWorkbook(settings.lastWorkbookId)
           : undefined;
@@ -209,8 +222,13 @@ export default function WorkbookShell() {
   };
 
   // 드래그 종료 후 한 번 호출됨 — 분할 비율·하단 패널 높이를 설정 스토어에 보존 (§3.2)
+  // splitRatio는 그리드:Python 비율이다 — 목차 패널이 열려 있어도 같은 뜻이 되도록 정규화한다
   const onLayoutChanged = (layout: Record<string, number>) => {
-    if (layout.grid) void saveSettings({ splitRatio: layout.grid });
+    if (layout.grid && layout.python) {
+      void saveSettings({
+        splitRatio: Math.round((layout.grid / (layout.grid + layout.python)) * 100),
+      });
+    }
   };
   const onVerticalLayoutChanged = (layout: Record<string, number>) => {
     if (layout.bottom) void saveSettings({ bottomPanelHeight: layout.bottom });
@@ -232,6 +250,7 @@ export default function WorkbookShell() {
                 [
                   ["grid", "그리드"],
                   ["python", "Python"],
+                  ["toc", "목차"],
                   ["bottom", "결과"],
                 ] as const
               ).map(([id, label]) => (
@@ -261,6 +280,7 @@ export default function WorkbookShell() {
                 </div>
               )}
               {mobileView === "python" && <PythonPanel />}
+              {mobileView === "toc" && <TocPanel />}
               {mobileView === "bottom" && (
                 <div className="h-full">
                   <BottomPanel client={runtime} />
@@ -288,12 +308,12 @@ export default function WorkbookShell() {
                   </button>
                 )}
                 <ResizablePanelGroup
-                  key={tier === "lg" && pyCollapsed ? "collapsed" : "split"}
+                  key={`${tier === "lg" && pyCollapsed ? "collapsed" : "split"}-${tocOpen ? "toc" : "no-toc"}`}
                   orientation="horizontal"
                   className="min-h-0"
                   onLayoutChanged={onLayoutChanged}
                 >
-                  <ResizablePanel id="grid" defaultSize={`${pyCollapsed && tier === "lg" ? 100 : splitRatio}%`} minSize="40%">
+                  <ResizablePanel id="grid" defaultSize={`${gridSize}%`} minSize="40%">
                     <div
                       {...dropHandlers}
                       className={`flex h-full min-w-0 flex-col ${dropActive ? "ring-2 ring-inset ring-primary" : ""}`}
@@ -307,10 +327,19 @@ export default function WorkbookShell() {
                       <ResizableHandle withHandle />
                       <ResizablePanel
                         id="python"
-                        defaultSize={`${100 - splitRatio}%`}
+                        defaultSize={`${pySize}%`}
                         minSize="15%"
                       >
                         <PythonPanel />
+                      </ResizablePanel>
+                    </>
+                  )}
+                  {/* 부록 D.2: 목차 전용 패널 (툴바 토글·자체 ✕, 상태는 설정에 저장) */}
+                  {tocOpen && (
+                    <>
+                      <ResizableHandle withHandle />
+                      <ResizablePanel id="toc" defaultSize={`${TOC_SIZE}%`} minSize="10%">
+                        <TocPanel onClose={closeToc} />
                       </ResizablePanel>
                     </>
                   )}

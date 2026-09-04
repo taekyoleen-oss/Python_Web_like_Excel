@@ -96,6 +96,58 @@ describe("마크다운 파서", () => {
     expect(tags).toEqual(expect.arrayContaining(["ul", "ol", "li"]));
   });
 
+  it("중첩 목록 — 2칸·탭 들여쓰기, 종류가 바뀌면 새 목록", () => {
+    const nodes = parseMarkdown("- 하나\n  - 하나-1\n\t- 하나-2\n- 둘");
+    expect(nodes).toHaveLength(1);
+    const list = nodes[0];
+    if (list.t !== "list") throw new Error("목록이 아님");
+    expect(list.items).toHaveLength(2);
+    const sub = list.items[0].list;
+    expect(sub?.items.map((x) => x.children[0])).toEqual([
+      { t: "text", v: "하나-1" },
+      { t: "text", v: "하나-2" },
+    ]);
+    expect(list.items[1].list).toBeUndefined();
+
+    // 중첩은 상위 li 안에 들어간다 (ul > li > ul > li)
+    const { tags } = render("- 하나\n  1. 안쪽");
+    expect(tags).toEqual(["ul", "li", "ol", "li"]);
+
+    // 같은 깊이에서 종류가 바뀌면 형제 목록
+    const mixed = parseMarkdown("- 하나\n1. 첫째");
+    expect(mixed.map((n) => n.t)).toEqual(["list", "list"]);
+  });
+
+  it("인용(>) — 좌측 세로 바 + 안쪽 문법도 해석", () => {
+    const nodes = parseMarkdown("> 목차(Context)\n> - 항목\n\n밖 문단");
+    expect(nodes[0].t).toBe("quote");
+    if (nodes[0].t !== "quote") throw new Error("인용이 아님");
+    expect(nodes[0].children.map((n) => n.t)).toEqual(["para", "list"]);
+    expect(nodes[1]).toMatchObject({ t: "para" });
+
+    const quote = findTag(renderMarkdown("> 인용문"), "blockquote");
+    expect(String(quote?.className)).toContain("border-l-2");
+    expect(render("> 인용문").text.join("")).toBe("인용문");
+  });
+
+  it("혼합 문서 — 헤딩·인용·중첩 목록·코드가 순서대로", () => {
+    const { tags, text } = render(
+      "# 제목 🚀\n> 인용\n\n- 하나\n  - 안쪽\n\n```py\nx = 1\n```",
+    );
+    expect(tags).toEqual([
+      "h1",
+      "blockquote",
+      "p",
+      "ul",
+      "li",
+      "ul",
+      "li",
+      "pre",
+      "code",
+    ]);
+    expect(text.join("|")).toBe("제목 🚀|인용|하나|안쪽|x = 1"); // 이모지는 평문 그대로
+  });
+
   it("링크 — 새 창 + noopener, 안전하지 않은 주소는 평문", () => {
     const [para] = parseMarkdown("[문서](https://example.com/a) 참고");
     expect(para.t === "para" && para.children[0]).toEqual({

@@ -7,7 +7,10 @@ export interface Cell {
   t: CellType;
   /** 표시 서식 힌트 ('0.0%', '#,##0', 'yyyy-mm-dd') */
   f?: string;
-  /** spill 출처 블록 id. 있으면 직접 편집 잠김 */
+  /**
+   * spill 출처 표시 `"<blockId>:<outputId>"`. 있으면 직접 편집 잠김.
+   * 구 워크북의 `"<blockId>"` 단독 표기는 로드 시 정규화된다 (부록 D.1).
+   */
   src?: string;
 }
 
@@ -66,6 +69,22 @@ export interface OutputSelection {
   rowLimit?: number;
 }
 
+/** 한 블록의 출력 하나 — 결과의 일부를 원하는 셀 영역에 배치한다 (설계서 부록 D) */
+export interface OutputBinding {
+  id: string;
+  /** 결과가 놓일 시트. 없으면 블록의 sheetId */
+  sheetId?: string;
+  anchor: { r: number; c: number };
+  mode: OutputMode;
+  includeIndex: IncludeIndex;
+  /** 어떤 값을 표시할지 (변수·열·행) */
+  selection?: OutputSelection;
+  /** 카드 목록에 표시할 이름 (없으면 변수명 또는 "마지막 표현식") */
+  label?: string;
+  /** 이 출력의 마지막 실행 결과 */
+  last?: RunResult;
+}
+
 export interface PyBlock {
   id: string;
   sheetId: string;
@@ -83,8 +102,13 @@ export interface PyBlock {
   markdown?: string;
   /** 카드 접기 상태 (마크다운·코드·결과 전부 숨김) */
   collapsed?: boolean;
-  /** 출력 선택 (변수·열·행) */
+  /** 출력 선택 (변수·열·행) — 레거시 단일 출력. 로드 시 outputs[0]로 정규화된다 */
   output?: OutputSelection;
+  /**
+   * 다중 출력. 정본이며 최소 1개를 가진다(로드 시 레거시 필드에서 정규화).
+   * anchor/outputMode/includeIndex/output/last는 outputs[0]와 동기화된 레거시 뷰다.
+   */
+  outputs?: OutputBinding[];
 }
 
 export type CalcMode = "auto" | "manual";

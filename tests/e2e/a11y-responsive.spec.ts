@@ -88,7 +88,7 @@ test("800×600: 그리드↔Python↔결과 탭 전환 UI", async ({ page }) => 
 
   // Python 탭 → 패널 표시, 그리드 숨김
   await tabs.getByRole("tab", { name: "Python" }).click();
-  await expect(page.getByRole("tab", { name: "목차" })).toBeVisible(); // Python 패널 [블록][목차]
+  await expect(page.getByRole("tab", { name: "목차" })).toBeVisible(); // 좁은 화면: 목차는 네 번째 탭
   await expect(page.getByTestId("data-grid-canvas")).toHaveCount(0);
 
   // 결과 탭 → 하단 패널 탭들

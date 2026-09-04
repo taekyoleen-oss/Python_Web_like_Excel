@@ -1,7 +1,8 @@
 // 마크다운 블록 파서·렌더러 — 의존성 없이 React 엘리먼트를 직접 만든다.
 // 원시 HTML을 절대 해석하지 않으므로(dangerouslySetInnerHTML 없음) .pygrid.json 공유가 안전하다.
 // 지원: #~###### 헤딩 · **굵게** · *기울임* · `인라인 코드` · ``` 코드 블록 ·
-//       -/*/+·1. 목록 · [텍스트](주소) · --- 구분선 · 문단/줄바꿈. 그 밖의 문법은 평문.
+//       -/*/+·1. 목록(중첩) · > 인용 · [텍스트](주소) · --- 구분선 · 문단/줄바꿈.
+//       그 밖의 문법은 평문.
 
 import { createElement, type ReactNode } from "react";
 import type { BlockKind, PyBlock, RunStatus } from "@/types/workbook";
@@ -15,11 +16,24 @@ export type Inline =
   | { t: "link"; v: string; href: string }
   | { t: "br"; v: "" };
 
+/** 목록 항목 — 중첩 목록(2칸·탭 들여쓰기)을 자식으로 가질 수 있다 */
+export interface MdListItem {
+  children: Inline[];
+  list?: MdListNode;
+}
+
+export interface MdListNode {
+  t: "list";
+  ordered: boolean;
+  items: MdListItem[];
+}
+
 export type MdNode =
   | { t: "heading"; level: number; children: Inline[] }
   | { t: "para"; children: Inline[] }
   | { t: "code"; lang: string; text: string }
-  | { t: "list"; ordered: boolean; items: Inline[][] }
+  | MdListNode
+  | { t: "quote"; children: MdNode[] }
   | { t: "hr" };
 
 // 코드 스팬 우선(그 안의 *·[]는 서식이 아니다) → 굵게 → 기울임 → 링크
@@ -51,10 +65,18 @@ function inlineTokens(text: string): Inline[] {
   return out;
 }
 
+/** 들여쓰기 폭 — 탭은 2칸으로 센다 */
+const indentWidth = (s: string): number => s.replace(/\t/g, "  ").length;
+
+const LIST_RE = /^(\s*)(?:([-*+])|(\d+)[.)])\s+(.*)$/;
+const QUOTE_RE = /^\s{0,3}>\s?(.*)$/;
+
 export function parseMarkdown(src: string): MdNode[] {
   const lines = src.split(/\r?\n/);
   const out: MdNode[] = [];
   let para: string[] = [];
+  /** 열려 있는 목록들 (들여쓰기 오름차순) — 중첩 목록 구성용 */
+  let stack: { indent: number; node: MdListNode }[] = [];
 
   const flushPara = () => {
     if (para.length === 0) return;
@@ -66,12 +88,17 @@ export function parseMarkdown(src: string): MdNode[] {
     out.push({ t: "para", children });
     para = [];
   };
+  /** 목록 밖의 블록이 시작되면 열린 목록을 닫는다 */
+  const closeLists = () => {
+    stack = [];
+  };
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const fence = /^\s*```(.*)$/.exec(line);
     if (fence) {
       flushPara();
+      closeLists();
       const body: string[] = [];
       i++;
       while (i < lines.length && !/^\s*```/.test(lines[i])) body.push(lines[i++]);
@@ -82,27 +109,61 @@ export function parseMarkdown(src: string): MdNode[] {
       flushPara();
       continue;
     }
+    const quote = QUOTE_RE.exec(line);
+    if (quote) {
+      flushPara();
+      closeLists();
+      const body = [quote[1]];
+      while (i + 1 < lines.length) {
+        const next = QUOTE_RE.exec(lines[i + 1]);
+        if (!next) break;
+        body.push(next[1]);
+        i++;
+      }
+      out.push({ t: "quote", children: parseMarkdown(body.join("\n")) });
+      continue;
+    }
     const h = /^(#{1,6})\s+(.*)$/.exec(line);
     if (h) {
       flushPara();
+      closeLists();
       out.push({ t: "heading", level: h[1].length, children: inlineTokens(h[2].trim()) });
       continue;
     }
     if (/^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/.test(line)) {
       flushPara();
+      closeLists();
       out.push({ t: "hr" });
       continue;
     }
-    const li = /^\s*(?:([-*+])|(\d+)[.)])\s+(.*)$/.exec(line);
+    const li = LIST_RE.exec(line);
     if (li) {
       flushPara();
-      const ordered = li[2] !== undefined;
-      const prev = out[out.length - 1];
-      const item = inlineTokens(li[3]);
-      if (prev?.t === "list" && prev.ordered === ordered) prev.items.push(item);
-      else out.push({ t: "list", ordered, items: [item] });
+      const indent = indentWidth(li[1]);
+      const ordered = li[3] !== undefined;
+      const item: MdListItem = { children: inlineTokens(li[4]) };
+      while (stack.length > 0 && stack[stack.length - 1].indent > indent) stack.pop();
+      const top = stack[stack.length - 1];
+      if (top && top.indent === indent) {
+        if (top.node.ordered === ordered) {
+          top.node.items.push(item);
+          continue;
+        }
+        stack.pop(); // 같은 깊이에서 종류가 바뀌면 새 목록
+      }
+      const node: MdListNode = { t: "list", ordered, items: [item] };
+      const parent = stack[stack.length - 1];
+      if (parent) {
+        const last = parent.node.items[parent.node.items.length - 1];
+        if (last) last.list = node;
+        else parent.node.items.push({ children: [], list: node });
+      } else {
+        out.push(node);
+      }
+      stack.push({ indent, node });
       continue;
     }
+    closeLists();
     para.push(line);
   }
   flushPara();
@@ -111,10 +172,11 @@ export function parseMarkdown(src: string): MdNode[] {
 
 // ── 렌더 ────────────────────────────────────────────────
 
+// h1은 크게, h2부터 뚜렷하게 작아진다 (부록 D.3 — 참고 문서의 제목 대비)
 const H_CLASS = [
-  "mt-1 font-heading text-[15px] font-semibold",
-  "mt-1 font-heading text-[13px] font-semibold",
-  "mt-1 text-xs font-semibold",
+  "mt-2 font-heading text-[19px] font-bold leading-6",
+  "mt-2 font-heading text-[15px] font-semibold leading-5",
+  "mt-1 text-[13px] font-semibold",
   "mt-1 text-xs font-semibold text-foreground/80",
   "mt-1 text-xs font-semibold text-muted-foreground",
   "mt-1 text-xs font-semibold text-muted-foreground",
@@ -153,49 +215,70 @@ function inlineNodes(items: Inline[]): ReactNode[] {
   });
 }
 
+/** 목록(중첩 포함) → ul/ol. 중첩 목록은 상위 li 안에 들어간다 */
+function listElement(node: MdListNode, key: number | string): ReactNode {
+  return createElement(
+    node.ordered ? "ol" : "ul",
+    {
+      key,
+      className: node.ordered
+        ? "ml-4 list-decimal space-y-0.5"
+        : "ml-4 list-disc space-y-0.5",
+    },
+    ...node.items.map((item, j) =>
+      createElement(
+        "li",
+        { key: j },
+        ...inlineNodes(item.children),
+        item.list ? listElement(item.list, "sub") : null,
+      ),
+    ),
+  );
+}
+
+function renderNode(node: MdNode, i: number): ReactNode {
+  switch (node.t) {
+    case "heading":
+      return createElement(
+        `h${node.level}`,
+        { key: i, className: H_CLASS[node.level - 1] },
+        ...inlineNodes(node.children),
+      );
+    case "code":
+      return createElement(
+        "pre",
+        {
+          key: i,
+          className:
+            "overflow-x-auto rounded border bg-code-bg p-2 font-mono text-[11px] leading-4",
+        },
+        createElement("code", null, node.text),
+      );
+    case "list":
+      return listElement(node, i);
+    case "quote":
+      return createElement(
+        "blockquote",
+        {
+          key: i,
+          className: "my-1 space-y-1 border-l-2 border-border pl-2 text-muted-foreground",
+        },
+        ...node.children.map((child, j) => renderNode(child, j)),
+      );
+    case "hr":
+      return createElement("hr", { key: i, className: "my-2 border-border" });
+    default:
+      return createElement(
+        "p",
+        { key: i, className: "text-xs leading-5" },
+        ...inlineNodes(node.children),
+      );
+  }
+}
+
 /** 마크다운 본문 → React 엘리먼트 배열 (원시 HTML 해석 없음) */
 export function renderMarkdown(src: string): ReactNode[] {
-  return parseMarkdown(src).map((node, i) => {
-    switch (node.t) {
-      case "heading":
-        return createElement(
-          `h${node.level}`,
-          { key: i, className: H_CLASS[node.level - 1] },
-          ...inlineNodes(node.children),
-        );
-      case "code":
-        return createElement(
-          "pre",
-          {
-            key: i,
-            className:
-              "overflow-x-auto rounded border bg-code-bg p-2 font-mono text-[11px] leading-4",
-          },
-          createElement("code", null, node.text),
-        );
-      case "list":
-        return createElement(
-          node.ordered ? "ol" : "ul",
-          {
-            key: i,
-            className: node.ordered
-              ? "ml-4 list-decimal space-y-0.5"
-              : "ml-4 list-disc space-y-0.5",
-          },
-          ...node.items.map((item, j) =>
-            createElement("li", { key: j }, ...inlineNodes(item)),
-          ),
-        );
-      case "hr":
-        return createElement("hr", { key: i, className: "my-2 border-border" });
-      default:
-        return createElement(
-          "p",
-          { key: i, className: "text-xs leading-5" },
-          ...inlineNodes(node.children),
-        );
-    }
-  });
+  return parseMarkdown(src).map(renderNode);
 }
 
 // ── 제목·목차 ────────────────────────────────────────────

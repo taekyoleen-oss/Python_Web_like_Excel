@@ -19,7 +19,7 @@ export default function StatusBar({ saveStatus }: { saveStatus: SaveStatus }) {
   const calcMode = useWorkbookStore((s) => s.workbook.calcMode);
   const blockCount = useWorkbookStore((s) => s.workbook.pyBlocks.length);
   const dirtyCount = useWorkbookStore((s) => Object.keys(s.dirtyBlocks).length);
-  const picking = useWorkbookStore((s) => !!s.anchorPickingBlockId);
+  const picking = useWorkbookStore((s) => !!s.anchorPicking);
 
   return (
     <div className="flex h-7 shrink-0 items-center gap-4 border-t bg-muted/60 px-3 text-xs text-muted-foreground">

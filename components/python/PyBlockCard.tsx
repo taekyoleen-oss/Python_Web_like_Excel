@@ -14,7 +14,9 @@ import {
   Eye,
   NotePencil,
   Play,
+  Plus,
   TrashSimple,
+  X,
 } from "@phosphor-icons/react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -49,10 +51,17 @@ import { formatA1 } from "@/lib/grid/a1";
 import { notifyWorkbookEdit } from "@/lib/grid/calc-host";
 import { renderMarkdown } from "@/lib/grid/markdown";
 import { useWorkbookStore } from "@/lib/grid/model";
+import { outputsOf } from "@/lib/grid/outputs";
 import { moveBlock, runBlock } from "@/lib/grid/run-block";
 import { getRuntimeClient } from "@/lib/runtime/client";
 import { cn } from "@/lib/utils";
-import { cellKey, type OutputMode, type OutputSelection, type PyBlock } from "@/types/workbook";
+import {
+  cellKey,
+  type OutputBinding,
+  type OutputMode,
+  type OutputSelection,
+  type PyBlock,
+} from "@/types/workbook";
 
 /** Radix Select는 빈 값을 못 쓴다 — '마지막 표현식' 자리표시 값 */
 const LAST_EXPR = "__last__";
@@ -76,13 +85,21 @@ function statusBadge(block: PyBlock, running: boolean) {
 }
 
 /** 출력 선택 변경 → dirty 표시 + (자동 모드) 재실행. 필터링은 런타임이 한다 */
-const applyOutput = (blockId: string, patch: OutputSelection) => {
-  store().setBlockOutput(blockId, patch);
+const applyOutput = (blockId: string, outputId: string, patch: OutputSelection) => {
+  store().setOutputSelection(blockId, outputId, patch);
   notifyWorkbookEdit([], [blockId]);
 };
 
 /** 출력 변수 — 런타임 전역 변수 목록(inspect) + '마지막 표현식' */
-function VariableSelect({ block }: { block: PyBlock }) {
+function VariableSelect({
+  block,
+  output,
+  index,
+}: {
+  block: PyBlock;
+  output: OutputBinding;
+  index: number;
+}) {
   const [vars, setVars] = useState<string[]>([]);
   const loaded = useRef(false);
 
@@ -98,25 +115,25 @@ function VariableSelect({ block }: { block: PyBlock }) {
   }, []);
 
   // 실행이 끝나면 갱신 (한 번이라도 목록을 연 카드만 — 유휴 inspect 폭주 방지)
-  const ranAt = block.last?.ranAt;
+  const ranAt = output.last?.ranAt;
   useEffect(() => {
     if (loaded.current) void refresh();
   }, [ranAt, refresh]);
 
-  const current = block.output?.variable;
+  const current = output.selection?.variable;
   const names = current && !vars.includes(current) ? [current, ...vars] : vars;
 
   return (
     <Select
       value={current ?? LAST_EXPR}
       onValueChange={(v) =>
-        applyOutput(block.id, { variable: v === LAST_EXPR ? undefined : v })
+        applyOutput(block.id, output.id, { variable: v === LAST_EXPR ? undefined : v })
       }
       onOpenChange={(open) => {
         if (open) void refresh();
       }}
     >
-      <SelectTrigger className="h-6 w-32 text-xs" aria-label="출력 변수">
+      <SelectTrigger className="h-6 w-32 text-xs" aria-label={`출력 ${index + 1} 변수`}>
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
@@ -136,20 +153,19 @@ function VariableSelect({ block }: { block: PyBlock }) {
  * spill 헤더 행(전부 문자열)에서 읽는다.
  * ponytail: 열을 거른 뒤에는 남은 열만 보인다 — '전체'로 되돌리면 목록도 복구된다.
  */
-function useTableColumns(block: PyBlock): string[] {
-  const sheet = useWorkbookStore((s) =>
-    s.workbook.sheets.find((sh) => sh.id === block.sheetId),
-  );
-  const preview = block.last?.preview as
+function useTableColumns(block: PyBlock, output: OutputBinding): string[] {
+  const sheetId = output.sheetId ?? block.sheetId;
+  const sheet = useWorkbookStore((s) => s.workbook.sheets.find((sh) => sh.id === sheetId));
+  const preview = output.last?.preview as
     | { kind?: string; columns?: string[] }
     | undefined;
-  const selected = block.output?.columns ?? [];
+  const selected = output.selection?.columns ?? [];
   let names: string[] = [];
   if (preview?.kind === "table" && preview.columns) {
     names = preview.columns;
   } else {
-    const rg = block.last?.spillRange;
-    if (sheet && rg && block.last?.kind === "table" && rg.r1 > rg.r0) {
+    const rg = output.last?.spillRange;
+    if (sheet && rg && output.last?.kind === "table" && rg.r1 > rg.r0) {
       for (let c = rg.c0; c <= rg.c1; c++) {
         const cell = sheet.cells[cellKey(rg.r0, c)];
         if (!cell || cell.t !== "s") {
@@ -165,21 +181,34 @@ function useTableColumns(block: PyBlock): string[] {
 }
 
 /** 열 선택 — 마지막 결과가 표일 때만 표시 */
-function ColumnsMenu({ block }: { block: PyBlock }) {
-  const all = useTableColumns(block);
+function ColumnsMenu({
+  block,
+  output,
+  index,
+}: {
+  block: PyBlock;
+  output: OutputBinding;
+  index: number;
+}) {
+  const all = useTableColumns(block, output);
   if (all.length === 0) return null;
 
-  const selected = block.output?.columns;
+  const selected = output.selection?.columns;
   const current = selected ?? all;
   const commit = (next: string[]) => {
     const full = next.length === 0 || next.length === all.length;
-    applyOutput(block.id, { columns: full ? undefined : next });
+    applyOutput(block.id, output.id, { columns: full ? undefined : next });
   };
 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="outline" size="sm" className="h-6 px-2 text-xs" aria-label="열 선택">
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-6 px-2 text-xs"
+          aria-label={`출력 ${index + 1} 열 선택`}
+        >
           열 {selected ? `${selected.length}/${all.length}` : "전체"}
         </Button>
       </DropdownMenuTrigger>
@@ -210,28 +239,141 @@ function ColumnsMenu({ block }: { block: PyBlock }) {
   );
 }
 
-/** 출력 행: 변수·열·행 제한 (출력 위치 지정은 ⋮ 메뉴) */
-function OutputRow({ block }: { block: PyBlock }) {
+const OUT_STATUS: Record<string, { label: string; cls: string }> = {
+  ok: { label: "성공", cls: "bg-primary/10 text-primary" },
+  error: { label: "오류", cls: "bg-destructive/10 text-destructive" },
+  spill: { label: "#SPILL!", cls: "bg-destructive/10 text-destructive" },
+};
+
+/** 출력 한 줄: [셀 주소][상태][변수][열][상위 N행][값/객체][삭제] */
+function OutputRow({
+  block,
+  output,
+  index,
+  canRemove,
+}: {
+  block: PyBlock;
+  output: OutputBinding;
+  index: number;
+  canRemove: boolean;
+}) {
+  const sheetId = output.sheetId ?? block.sheetId;
+  const sheetName = useWorkbookStore(
+    (s) => s.workbook.sheets.find((sh) => sh.id === sheetId)?.name ?? "?",
+  );
+  const picking = useWorkbookStore(
+    (s) => s.anchorPicking?.blockId === block.id && s.anchorPicking.outputId === output.id,
+  );
+  const addr = formatA1({
+    r0: output.anchor.r,
+    c0: output.anchor.c,
+    r1: output.anchor.r,
+    c1: output.anchor.c,
+  });
+  const status = output.last ? OUT_STATUS[output.last.status] : undefined;
+
   return (
-    <div className="flex flex-wrap items-center gap-1 border-b bg-muted/20 px-2 py-1">
-      <span className="text-xs text-muted-foreground">출력</span>
-      <VariableSelect block={block} />
-      <ColumnsMenu block={block} />
+    <div
+      className="flex flex-wrap items-center gap-1 border-b bg-muted/20 px-2 py-1"
+      data-output-id={output.id}
+    >
+      <button
+        onClick={() =>
+          store().setAnchorPicking(picking ? null : { blockId: block.id, outputId: output.id })
+        }
+        aria-label={`출력 ${index + 1} 위치`}
+        aria-pressed={picking}
+        title="클릭 후 결과를 놓을 셀을 고르세요"
+        className={cn(
+          "rounded border px-1.5 py-0.5 font-mono text-xs hover:bg-accent",
+          picking ? "border-primary text-primary" : "border-transparent text-foreground/80",
+        )}
+      >
+        {sheetId === block.sheetId ? addr : `${sheetName}!${addr}`}
+      </button>
+      {status && (
+        <Badge className={status.cls} title={output.last?.summaryKo}>
+          {status.label}
+        </Badge>
+      )}
+      <VariableSelect block={block} output={output} index={index} />
+      <ColumnsMenu block={block} output={output} index={index} />
       <Input
         type="number"
         min={1}
         inputMode="numeric"
-        value={block.output?.rowLimit ?? ""}
+        value={output.selection?.rowLimit ?? ""}
         placeholder="상위 N행"
-        aria-label="상위 N행"
+        aria-label={`출력 ${index + 1} 상위 N행`}
         onChange={(e) => {
           const n = Number(e.target.value);
-          applyOutput(block.id, {
+          applyOutput(block.id, output.id, {
             rowLimit: Number.isFinite(n) && n > 0 ? Math.floor(n) : undefined,
           });
         }}
         className="h-6 w-24 px-1.5"
       />
+      <Select
+        value={output.mode}
+        onValueChange={(v) => {
+          store().setOutputMode(block.id, output.id, v as OutputMode);
+          notifyWorkbookEdit([], [block.id]);
+        }}
+      >
+        <SelectTrigger className="h-6 w-20 text-xs" aria-label={`출력 ${index + 1} 모드`}>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="values">값</SelectItem>
+          <SelectItem value="object">객체</SelectItem>
+        </SelectContent>
+      </Select>
+      <Button
+        variant="ghost"
+        size="icon-xs"
+        disabled={!canRemove}
+        onClick={() => store().removeOutput(block.id, output.id)}
+        aria-label={`출력 ${index + 1} 삭제`}
+        title={canRemove ? "이 출력 삭제" : "출력은 최소 하나 필요합니다"}
+      >
+        <X />
+      </Button>
+      {output.last?.status !== "ok" && output.last?.summaryKo && (
+        <span className="w-full truncate text-xs text-destructive" title={output.last.summaryKo}>
+          {output.last.summaryKo}
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** 출력 목록 — 한 블록의 결과를 여러 셀에 나눠 놓는다 (부록 D.1) */
+function OutputList({ block }: { block: PyBlock }) {
+  const outputs = outputsOf(block);
+  return (
+    <div data-testid="output-list">
+      {outputs.map((o, i) => (
+        <OutputRow
+          key={o.id}
+          block={block}
+          output={o}
+          index={i}
+          canRemove={outputs.length > 1}
+        />
+      ))}
+      <div className="border-b bg-muted/20 px-2 py-1">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-6 px-2 text-xs text-primary"
+          onClick={() => {
+            const id = store().addOutput(block.id);
+            if (id) notifyWorkbookEdit([], [block.id]);
+          }}
+        >
+          <Plus className="size-3" /> 출력 추가
+        </Button>
+      </div>
     </div>
   );
 }
@@ -252,7 +394,8 @@ function goToAnchor(block: PyBlock): void {
 function MoreMenu({ block, onRun }: { block: PyBlock; onRun: () => void }) {
   const isMarkdown = block.kind === "markdown";
   const collapsed = !!block.collapsed;
-  const picking = useWorkbookStore((s) => s.anchorPickingBlockId === block.id);
+  const firstOutputId = block.outputs?.[0]?.id;
+  const picking = useWorkbookStore((s) => s.anchorPicking?.blockId === block.id);
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -279,12 +422,18 @@ function MoreMenu({ block, onRun }: { block: PyBlock; onRun: () => void }) {
             <DropdownMenuSeparator />
           </>
         )}
-        <DropdownMenuItem
-          onClick={() => store().setAnchorPicking(picking ? null : block.id)}
-        >
-          {isMarkdown ? "위치 지정" : "출력 위치 지정"}
-          {picking && <DropdownMenuShortcut>지정 중</DropdownMenuShortcut>}
-        </DropdownMenuItem>
+        {(isMarkdown || firstOutputId) && (
+          <DropdownMenuItem
+            onClick={() =>
+              store().setAnchorPicking(
+                picking ? null : { blockId: block.id, outputId: firstOutputId ?? "" },
+              )
+            }
+          >
+            {isMarkdown ? "위치 지정" : "출력 위치 지정 (첫 출력)"}
+            {picking && <DropdownMenuShortcut>지정 중</DropdownMenuShortcut>}
+          </DropdownMenuItem>
+        )}
         <DropdownMenuItem onClick={() => goToAnchor(block)}>앵커 셀로 이동</DropdownMenuItem>
         <DropdownMenuItem
           onClick={() => store().setBlockCollapsed(block.id, !collapsed)}
@@ -310,7 +459,7 @@ export default function PyBlockCard({
   const running = useWorkbookStore((s) => !!s.runningBlocks[block.id]);
   const dirty = useWorkbookStore((s) => !!s.dirtyBlocks[block.id]);
   const hovered = useWorkbookStore((s) => s.hoverBlockId === block.id);
-  const picking = useWorkbookStore((s) => s.anchorPickingBlockId === block.id);
+  const picking = useWorkbookStore((s) => s.anchorPicking?.blockId === block.id);
   const focusRequested = useWorkbookStore((s) => s.focusBlockId === block.id);
   const sheetName = useWorkbookStore(
     (s) => s.workbook.sheets.find((sh) => sh.id === block.sheetId)?.name ?? "?",
@@ -547,7 +696,7 @@ export default function PyBlockCard({
               )
             ) : (
               <>
-                <OutputRow block={block} />
+                <OutputList block={block} />
                 {narrow ? (
                   <>
                     <button

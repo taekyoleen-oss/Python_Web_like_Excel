@@ -29,13 +29,26 @@ import { colToLetter, formatA1 } from "@/lib/grid/a1";
 import { notifyWorkbookEdit } from "@/lib/grid/calc-host";
 import { formatCellDisplay } from "@/lib/grid/format";
 import { useWorkbookStore } from "@/lib/grid/model";
+import { outputsOf, srcBlockId } from "@/lib/grid/outputs";
 import { applyAnchorPick } from "@/lib/grid/run-block";
-import { cellKey, type Cell, type CellRange, type PyBlock } from "@/types/workbook";
+import {
+  cellKey,
+  type Cell,
+  type CellRange,
+  type OutputBinding,
+  type PyBlock,
+} from "@/types/workbook";
+
+/** 앵커 셀에 놓인 출력 (배지·객체 카드·컨텍스트 메뉴 대상) */
+interface AnchorEntry {
+  block: PyBlock;
+  output?: OutputBinding;
+}
 
 /** §3.4: spill 잠금 안내 문구 */
-function spillLockMessage(blockId: string): string {
+function spillLockMessage(src: string): string {
   const st = useWorkbookStore.getState();
-  const block = st.workbook.pyBlocks.find((b) => b.id === blockId);
+  const block = st.workbook.pyBlocks.find((b) => b.id === srcBlockId(src));
   if (!block) return "Python 블록의 결과입니다. 코드를 수정하거나 블록을 삭제하세요";
   const sheetName = st.workbook.sheets.find((s) => s.id === block.sheetId)?.name ?? "?";
   const addr = formatA1({
@@ -127,11 +140,18 @@ export default function SheetGrid() {
     if (f) setFontFamily(f);
   }, []);
 
-  /** 활성 시트의 앵커 → 블록 */
+  /** 활성 시트의 앵커 → 블록·출력 (출력마다 앵커가 있다 — 부록 D.1) */
   const anchorMap = useMemo(() => {
-    const map = new Map<string, PyBlock>();
+    const map = new Map<string, AnchorEntry>();
     for (const b of pyBlocks) {
-      if (b.sheetId === sheet.id) map.set(cellKey(b.anchor.r, b.anchor.c), b);
+      if (b.kind === "markdown") {
+        if (b.sheetId === sheet.id) map.set(cellKey(b.anchor.r, b.anchor.c), { block: b });
+        continue;
+      }
+      for (const o of outputsOf(b)) {
+        if ((o.sheetId ?? b.sheetId) !== sheet.id) continue;
+        map.set(cellKey(o.anchor.r, o.anchor.c), { block: b, output: o });
+      }
     }
     return map;
   }, [pyBlocks, sheet.id]);
@@ -141,16 +161,17 @@ export default function SheetGrid() {
     [pyBlocks],
   );
 
-  /** 활성 시트의 spill 테두리 범위 */
-  const spillRanges = useMemo(
-    () =>
-      pyBlocks
-        .filter(
-          (b) => b.sheetId === sheet.id && b.last?.status === "ok" && b.last.spillRange,
-        )
-        .map((b) => b.last!.spillRange!),
-    [pyBlocks, sheet.id],
-  );
+  /** 활성 시트의 spill 테두리 범위 — 블록마다 출력 수만큼 */
+  const spillRanges = useMemo(() => {
+    const out: CellRange[] = [];
+    for (const b of pyBlocks) {
+      for (const o of outputsOf(b)) {
+        if ((o.sheetId ?? b.sheetId) !== sheet.id) continue;
+        if (o.last?.status === "ok" && o.last.spillRange) out.push(o.last.spillRange);
+      }
+    }
+    return out;
+  }, [pyBlocks, sheet.id]);
 
   const flashRange = flash && flash.sheetId === sheet.id ? flash.range : null;
   const hoverRange = useWorkbookStore((s) => s.hoverRange);
@@ -193,7 +214,8 @@ export default function SheetGrid() {
       const [col, row] = item;
       const key = cellKey(row, col);
       const cell = sheet.cells[key];
-      const anchorBlock = anchorMap.get(key);
+      const anchor = anchorMap.get(key);
+      const anchorBlock = anchor?.block;
 
       // 실행 중 앵커: #BUSY! (렌더 전용 — 스토어 셀은 건드리지 않는다)
       if (anchorBlock && runningBlocks[anchorBlock.id]) {
@@ -213,10 +235,9 @@ export default function SheetGrid() {
       const locked = !!cell.src;
       // 객체 카드 앵커: drawCell이 카드를 그린다 (기본 텍스트는 비움)
       if (
-        anchorBlock &&
-        anchorBlock.outputMode === "object" &&
-        anchorBlock.last?.status === "ok" &&
-        cell.src === anchorBlock.id
+        anchor?.output?.mode === "object" &&
+        anchor.output.last?.status === "ok" &&
+        cell.src === `${anchor.block.id}:${anchor.output.id}`
       ) {
         return {
           kind: GridCellKind.Text,
@@ -253,14 +274,14 @@ export default function SheetGrid() {
     (args, drawContent) => {
       const { ctx, rect, col, row } = args;
       const key = cellKey(row, col);
-      const anchorBlock = anchorMap.get(key);
+      const anchor = anchorMap.get(key);
+      const anchorBlock = anchor?.block;
       const storeCell = sheet.cells[key];
       const isCard =
-        anchorBlock &&
-        anchorBlock.outputMode === "object" &&
-        anchorBlock.last?.status === "ok" &&
-        storeCell?.src === anchorBlock.id &&
-        !runningBlocks[anchorBlock.id];
+        anchor?.output?.mode === "object" &&
+        anchor.output.last?.status === "ok" &&
+        storeCell?.src === `${anchor.block.id}:${anchor.output.id}` &&
+        !runningBlocks[anchor.block.id];
 
       drawContent();
 
@@ -450,7 +471,7 @@ export default function SheetGrid() {
   const onCellClicked = useCallback(
     (item: Item) => {
       const [col, row] = item;
-      const picking = useWorkbookStore.getState().anchorPickingBlockId;
+      const picking = useWorkbookStore.getState().anchorPicking;
       if (picking) {
         applyAnchorPick(picking, sheet.id, { r: row, c: col });
         return;
@@ -460,13 +481,13 @@ export default function SheetGrid() {
       if (!cell?.src) return;
       const store = useWorkbookStore.getState();
       if (cell.t === "e") {
-        store.setSelectedBlock(cell.src);
+        store.setSelectedBlock(srcBlockId(cell.src));
         store.setBottomTab("diagnostics");
         return;
       }
-      const anchorBlock = anchorMap.get(key);
-      if (anchorBlock && anchorBlock.outputMode === "object" && anchorBlock.last?.status === "ok") {
-        store.setSelectedBlock(anchorBlock.id);
+      const anchor = anchorMap.get(key);
+      if (anchor?.output?.mode === "object" && anchor.output.last?.status === "ok") {
+        store.setSelectedBlock(anchor.block.id);
         store.setBottomTab("preview");
       }
     },
@@ -505,15 +526,16 @@ export default function SheetGrid() {
       }
       const [col, row] = args.location;
       const cell = sheet.cells[cellKey(row, col)];
-      useWorkbookStore.getState().setHoverBlock(cell?.src ?? null);
+      useWorkbookStore.getState().setHoverBlock(cell?.src ? srcBlockId(cell.src) : null);
       if (!cell?.src) {
         setHoverTip(null);
         return;
       }
       // 오류 셀 → 한국어 요약, 그 외 src(spill 잠금) 셀 → 잠금 안내 (§3.4)
       const text =
-        (cell.t === "e" ? blockById.get(cell.src)?.last?.summaryKo : undefined) ??
-        spillLockMessage(cell.src);
+        (cell.t === "e"
+          ? blockById.get(srcBlockId(cell.src))?.last?.summaryKo
+          : undefined) ?? spillLockMessage(cell.src);
       setHoverTip({
         x: args.bounds.x,
         y: args.bounds.y + args.bounds.height + 4,
@@ -523,13 +545,19 @@ export default function SheetGrid() {
     [sheet.cells, blockById],
   );
 
-  // 컨텍스트 메뉴 항목용 정보
-  const menuBlock = menuCell
-    ? (anchorMap.get(cellKey(menuCell.r, menuCell.c)) ??
-      (sheet.cells[cellKey(menuCell.r, menuCell.c)]?.src
-        ? blockById.get(sheet.cells[cellKey(menuCell.r, menuCell.c)]!.src!)
-        : undefined))
-    : undefined;
+  // 컨텍스트 메뉴 항목용 정보 (앵커면 그 출력, spill 셀이면 그 셀을 쓴 출력)
+  const menuEntry: AnchorEntry | undefined = (() => {
+    if (!menuCell) return undefined;
+    const key = cellKey(menuCell.r, menuCell.c);
+    const hit = anchorMap.get(key);
+    if (hit) return hit;
+    const src = sheet.cells[key]?.src;
+    if (!src) return undefined;
+    const block = blockById.get(srcBlockId(src));
+    if (!block) return undefined;
+    return { block, output: outputsOf(block).find((o) => `${block.id}:${o.id}` === src) };
+  })();
+  const menuBlock = menuEntry?.block;
 
   const copyRef = () => {
     const sel = useWorkbookStore.getState().selection;
@@ -577,19 +605,20 @@ export default function SheetGrid() {
       <ContextMenuContent>
         {menuBlock && (
           <>
-            {menuBlock.kind !== "markdown" && (
+            {menuBlock.kind !== "markdown" && menuEntry?.output && (
               <ContextMenuItem
                 onClick={() =>
                   useWorkbookStore
                     .getState()
-                    .setBlockOutputMode(
+                    .setOutputMode(
                       menuBlock.id,
-                      menuBlock.outputMode === "values" ? "object" : "values",
+                      menuEntry.output!.id,
+                      menuEntry.output!.mode === "values" ? "object" : "values",
                     )
                 }
               >
                 Python 출력 →{" "}
-                {menuBlock.outputMode === "values" ? "Python 객체" : "Excel 값"}
+                {menuEntry.output.mode === "values" ? "Python 객체" : "Excel 값"}
               </ContextMenuItem>
             )}
             <ContextMenuItem

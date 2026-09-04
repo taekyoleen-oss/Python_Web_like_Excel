@@ -20,7 +20,8 @@ function sampleWorkbook(): Workbook {
     "1:0": { v: 12.5, t: "n", f: "0.0%" },
     "2:0": { v: true, t: "b" },
     "3:0": { v: "2026-09-03", t: "d", f: "yyyy-mm-dd" },
-    "4:0": { v: "#PYTHON!", t: "e", src: "blk1" },
+    "4:0": { v: "#PYTHON!", t: "e", src: "blk1:out1" },
+    "0:6": { v: 7, t: "n", src: "blk1:out2" },
   };
   wb.sheets[0].colWidths = { 0: 120 };
   wb.sheets[0].frozenCols = 1;
@@ -44,6 +45,42 @@ function sampleWorkbook(): Workbook {
         ranAt: "2026-09-03T00:00:00Z",
         imageBlobId: "blob-1",
       },
+      // v1.2 다중 출력: outputs가 정본, 위 레거시 필드는 outputs[0]의 뷰
+      outputs: [
+        {
+          id: "out1",
+          anchor: { r: 4, c: 0 },
+          mode: "object",
+          includeIndex: "always",
+          selection: { variable: "df", columns: ["a", "b"], rowLimit: 5 },
+          last: {
+            status: "ok",
+            kind: "image",
+            stdout: "",
+            stderr: "",
+            durationMs: 12,
+            ranAt: "2026-09-03T00:00:00Z",
+            imageBlobId: "blob-1",
+          },
+        },
+        {
+          id: "out2",
+          anchor: { r: 0, c: 6 },
+          mode: "values",
+          includeIndex: "auto",
+          selection: { variable: "wide" },
+          label: "요약표",
+          last: {
+            status: "ok",
+            kind: "table",
+            stdout: "",
+            stderr: "",
+            durationMs: 3,
+            ranAt: "2026-09-03T00:00:01Z",
+            spillRange: { r0: 0, c0: 6, r1: 0, c1: 6 },
+          },
+        },
+      ],
     },
     {
       id: "blk2",
@@ -67,7 +104,74 @@ describe("workbook-json", () => {
     const restored = parseWorkbookJson(serializeWorkbook(wb));
     const expected = structuredClone(wb);
     delete expected.pyBlocks[0].last!.imageBlobId; // 유일하게 허용되는 차이
+    delete expected.pyBlocks[0].outputs![0].last!.imageBlobId;
     expect(restored).toEqual(expected);
+  });
+
+  it("v1.2 다중 출력 왕복 보존 — outputs가 정본, 레거시 필드는 outputs[0]와 동기", () => {
+    const restored = parseWorkbookJson(serializeWorkbook(sampleWorkbook()));
+    const outputs = restored.pyBlocks[0].outputs!;
+    expect(outputs).toHaveLength(2);
+    expect(outputs[1]).toMatchObject({
+      id: "out2",
+      anchor: { r: 0, c: 6 },
+      mode: "values",
+      selection: { variable: "wide" },
+      label: "요약표",
+    });
+    expect(outputs[1].last?.spillRange).toEqual({ r0: 0, c0: 6, r1: 0, c1: 6 });
+    // 레거시 뷰 = outputs[0]
+    expect(restored.pyBlocks[0].anchor).toEqual(outputs[0].anchor);
+    expect(restored.pyBlocks[0].outputMode).toBe(outputs[0].mode);
+    expect(restored.pyBlocks[0].output).toEqual(outputs[0].selection);
+    // 마크다운 블록은 출력이 없다
+    expect(restored.pyBlocks[1].outputs).toBeUndefined();
+  });
+
+  it("다중 출력 이전 파일: 로드 시 outputs 1개로 정규화 + src 태그 이관", () => {
+    const old = JSON.stringify({
+      version: 1,
+      id: "x",
+      title: "t",
+      sheets: [
+        {
+          id: "s",
+          name: "S",
+          rowCount: 10,
+          colCount: 5,
+          cells: {
+            "0:0": { v: 1, t: "n", src: "b" }, // 구 표기: blockId 단독
+            "1:0": { v: 2, t: "n" },
+          },
+        },
+      ],
+      pyBlocks: [
+        {
+          id: "b",
+          sheetId: "s",
+          anchor: { r: 0, c: 0 },
+          code: "1+1",
+          outputMode: "values",
+          includeIndex: "always",
+          output: { variable: "df" },
+          last: { status: "ok", stdout: "", stderr: "", durationMs: 1, ranAt: "" },
+        },
+      ],
+    });
+    const wb = parseWorkbookJson(old);
+    const outputs = wb.pyBlocks[0].outputs!;
+    expect(outputs).toHaveLength(1);
+    expect(outputs[0]).toMatchObject({
+      anchor: { r: 0, c: 0 },
+      mode: "values",
+      includeIndex: "always",
+      selection: { variable: "df" },
+    });
+    expect(outputs[0].id).toBeTruthy();
+    expect(outputs[0].last?.status).toBe("ok");
+    // spill 셀의 소유 표시가 "<blockId>:<outputId>"로 옮겨진다
+    expect(wb.sheets[0].cells["0:0"].src).toBe(`b:${outputs[0].id}`);
+    expect(wb.sheets[0].cells["1:0"].src).toBeUndefined();
   });
 
   it("v1.1 필드(kind·title·markdown·collapsed·output) 왕복 보존", () => {

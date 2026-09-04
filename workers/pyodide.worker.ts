@@ -7,6 +7,7 @@ import type { PyodideInterface } from "pyodide";
 import type {
   MainToWorker,
   OutCell,
+  OutputItem,
   PreviewPayload,
   VariableInfo,
   WorkerToMain,
@@ -200,6 +201,38 @@ function b64ToArrayBuffer(b64: string): ArrayBuffer {
   return u8.buffer;
 }
 
+/** _pygrid_run_convert_multi 결과: 성공이면 요청 순서대로 items */
+interface PyMultiResult {
+  ok: boolean;
+  items?: (PyConvertResult & { id: string })[];
+  etype?: string;
+  msg?: string;
+  tb?: string;
+}
+
+/** convert.py 출력 하나 → 프로토콜 OutputItem (PNG는 ArrayBuffer로 디코드) */
+function toOutputItem(r: PyConvertResult & { id: string }): OutputItem {
+  if (!r.ok) {
+    return {
+      id: r.id,
+      ok: false,
+      errorType: r.etype ?? "Exception",
+      message: r.msg ?? "",
+      traceback: r.tb ?? "",
+    };
+  }
+  return {
+    id: r.id,
+    ok: true,
+    kind: r.kind ?? "object",
+    cells: r.cells,
+    typeName: r.typeName,
+    shape: r.shape,
+    preview: r.preview,
+    imagePng: r.pngB64 ? b64ToArrayBuffer(r.pngB64) : undefined,
+  };
+}
+
 async function handleRun(msg: Extract<MainToWorker, { t: "run" }>): Promise<void> {
   const t0 = performance.now();
   const fail = (errorType: string, message: string, traceback: string): void =>
@@ -227,6 +260,38 @@ async function handleRun(msg: Extract<MainToWorker, { t: "run" }>): Promise<void
     py.globals.set("_pygrid_snapshots", JSON.stringify(msg.snapshots));
     py.runPython("_pygrid_xl_load(_pygrid_snapshots)");
     py.globals.set("_pygrid_code", msg.code);
+    if (msg.outputs) {
+      // 다중 출력: 본문 1회 실행 + 출력별 변환 (출력 단위 실패는 그 출력만 실패)
+      py.globals.set("_pygrid_outputs", JSON.stringify(msg.outputs));
+      const rawMulti: string = await py.runPythonAsync(
+        "_pygrid_run_convert_multi(_pygrid_code, _pygrid_outputs)",
+      );
+      const m = JSON.parse(rawMulti) as PyMultiResult;
+      if (!m.ok) {
+        fail(m.etype ?? "Exception", m.msg ?? "", m.tb ?? "");
+        return;
+      }
+      const outputs = (m.items ?? []).map(toOutputItem);
+      const transfer = outputs
+        .map((o) => (o.ok ? o.imagePng : undefined))
+        .filter((b): b is ArrayBuffer => b !== undefined);
+      const first = outputs.find((o) => o.ok);
+      post(
+        {
+          t: "result",
+          id: msg.id,
+          blockId: msg.blockId,
+          ok: true,
+          kind: first && first.ok ? first.kind : "object",
+          outputs,
+          stdout: "",
+          stderr: "",
+          durationMs: Math.round(performance.now() - t0),
+        },
+        transfer.length > 0 ? transfer : undefined,
+      );
+      return;
+    }
     py.globals.set("_pygrid_output_mode", msg.outputMode);
     py.globals.set("_pygrid_include_index", msg.includeIndex);
     // 출력 선택은 JSON 문자열로 넘긴다(PyProxy 금지). 없으면 "null" → Python None

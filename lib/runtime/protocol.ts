@@ -36,8 +36,42 @@ export type PreviewPayload =
   | { kind: "repr"; repr: string }
   | { kind: "image" };
 
+/** 다중 출력 요청 — 코드는 1회만 실행하고 출력마다 변환한다 */
+export interface OutputRequest {
+  /** PyBlock.outputs[].id */
+  id: string;
+  mode: OutputMode;
+  includeIndex: IncludeIndex;
+  selection?: OutputSelection;
+}
+
+export interface OutputItemSuccess {
+  id: string;
+  ok: true;
+  kind: "scalar" | "table" | "image" | "object";
+  /** 값 모드 결과 */
+  cells?: OutCell[][];
+  typeName?: string;
+  shape?: [number, number];
+  preview?: PreviewPayload;
+  imagePng?: ArrayBuffer;
+}
+
+/** 출력 단위 실패(예: 지정 변수 없음) — 코드 자체는 성공한 경우 */
+export interface OutputItemFailure {
+  id: string;
+  ok: false;
+  errorType: string;
+  message: string;
+  traceback?: string;
+}
+
+export type OutputItem = OutputItemSuccess | OutputItemFailure;
+
 export interface RunSuccess {
   ok: true;
+  /** 다중 출력 결과. run에 outputs를 보낸 경우 채워진다 */
+  outputs?: OutputItem[];
   kind: "scalar" | "table" | "image" | "object";
   /** 값(spill) 모드 결과. 객체 모드에서는 없음 */
   cells?: OutCell[][];
@@ -95,8 +129,10 @@ export type MainToWorker =
       snapshots: Record<string, RangeSnapshot>;
       outputMode: OutputMode;
       includeIndex: IncludeIndex;
-      /** 출력 선택: 마지막 표현식 대신 특정 변수 / DataFrame 열·행 제한 */
+      /** 출력 선택: 마지막 표현식 대신 특정 변수 / DataFrame 열·행 제한 (레거시 단일 출력) */
       output?: OutputSelection;
+      /** 다중 출력 요청. 있으면 outputMode/includeIndex/output 대신 이쪽을 쓴다 */
+      outputs?: OutputRequest[];
     }
   | { t: "repl"; id: number; code: string }
   | { t: "inspect"; id: number }
