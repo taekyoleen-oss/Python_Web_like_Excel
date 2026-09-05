@@ -76,7 +76,7 @@ export interface FitPayload {
 
 /* ─────────────────────────── 파이썬 스크립트 ─────────────────────────── */
 
-const FIT_SCRIPT = `
+export const FIT_SCRIPT = `
 import json, math, warnings
 import numpy as np
 from scipy import stats
@@ -535,22 +535,13 @@ if FREQ:
             row["error"] = str(e)[:300]
         OUT["frequency"].append(row)
 
-json.dumps(OUT)
+with open("_fit_output.json", "w", encoding="utf-8") as _f:
+    json.dump(OUT, _f)
 `;
+// 소스와의 차이는 위 꼬리뿐 — 소스는 마지막 표현식 json.dumps(OUT)를 repl 반환값으로 썼지만,
+// repl repr 문자열 파싱은 취약해 FS 파일(_fit_output.json)로 회수한다(R4).
 
 /* ─────────────────────────── 실행 래퍼 ─────────────────────────── */
 
-/**
- * 적합 실행 — Pyodide 로드(onPhase "boot") → numpy/scipy 로드("pkg") →
- * 스크립트 실행("run"). 결과는 FitRunResult. 오류는 예외로 던진다.
- */
-export async function runDistributionFit(
-  payload: FitPayload,
-  onPhase: (p: RunPhase) => void
-): Promise<FitRunResult> {
-  // TODO(R4): 워커 프로토콜 writeFile/readFile로 _fit_input.json 기록 →
-  // FIT_SCRIPT 실행 → _fit_output.json 회수. lib/reference/fit-runner.ts에서 구현한다.
-  void payload;
-  void onPhase;
-  throw new Error("모델적합 엔진은 R4 단계에서 워커 런타임에 연결됩니다");
-}
+// 구현: lib/reference/fit-runner.ts (워커 런타임 writeFile/repl/readFile 어댑터)
+export { runDistributionFit } from "./fit-runner";

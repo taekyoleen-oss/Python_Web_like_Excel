@@ -53,7 +53,9 @@ export class RuntimeClient {
   private nextId = 1;
   private pending = new Map<number, Pending>();
   /** ready 전에 들어온 요청 큐 — "런타임 준비 후 실행됩니다" (설계서 §4.7) */
-  private queue: (MainToWorker & { id: number })[] = [];
+  private queue: { msg: MainToWorker & { id: number }; transfer?: Transferable[] }[] = [];
+  /** writeFile로 쓴 파일의 클라이언트 사본 — 재부트 시 FS가 초기화되므로 ready마다 다시 쓴다 */
+  private fileCache = new Map<string, Uint8Array>();
   private status: RuntimeStatusName = "idle";
   private listeners = new Map<keyof RuntimeEvents, Set<(payload: never) => void>>();
   private sharedInterrupt: { sab: SharedArrayBuffer; view: Uint8Array } | null = null;
@@ -210,13 +212,13 @@ export class RuntimeClient {
 
   // ── 요청/응답 ───────────────────────────────────────────
 
-  private post(msg: MainToWorker): void {
-    this.worker.postMessage(msg);
+  private post(msg: MainToWorker, transfer?: Transferable[]): void {
+    this.worker.postMessage(msg, transfer ?? []);
   }
 
   private request(
     msg: MainToWorker & { id: number },
-    opts: { busy?: boolean; timeoutSec?: number } = {},
+    opts: { busy?: boolean; timeoutSec?: number; transfer?: Transferable[] } = {},
   ): Promise<WorkerToMain> {
     return new Promise<WorkerToMain>((resolve, reject) => {
       const timer = opts.timeoutSec
@@ -224,10 +226,10 @@ export class RuntimeClient {
         : undefined;
       this.pending.set(msg.id, { resolve, reject, timer, busy: opts.busy ?? false });
       if (this.readyFlag) {
-        this.post(msg);
+        this.post(msg, opts.transfer);
         this.refreshStatus();
       } else {
-        this.queue.push(msg); // 준비 전 큐잉 — ready 시 flush
+        this.queue.push({ msg, transfer: opts.transfer }); // 준비 전 큐잉 — ready 시 flush
       }
     });
   }
@@ -266,9 +268,15 @@ export class RuntimeClient {
         this.versions = { pyVersion: msg.pyVersion, pyodideVersion: msg.pyodideVersion };
         this.bootSettle?.resolve();
         this.bootSettle = null;
+        // 캐시된 파일을 큐보다 먼저 다시 쓴다(재부트 시 FS 초기화 — 큐의 실행이 파일을 볼 수 있게).
+        // 응답은 추적하지 않는다(best-effort) — fileWritten이 와도 pending에 없으면 무시된다
+        for (const [path, bytes] of this.fileCache) {
+          const copy = bytes.slice();
+          this.post({ t: "writeFile", id: this.nextId++, path, bytes: copy.buffer }, [copy.buffer]);
+        }
         const q = this.queue;
         this.queue = [];
-        for (const m of q) this.post(m);
+        for (const m of q) this.post(m.msg, m.transfer);
         this.refreshStatus();
         break;
       }
@@ -370,6 +378,45 @@ export class RuntimeClient {
       { t: "resetRuntime", id, initScript: script },
       { busy: true, timeoutSec: this.defaultTimeoutSec },
     );
+  }
+
+  // ── 파일 I/O (R4) ───────────────────────────────────────
+
+  /** path는 경로 없는 파일 이름만 허용('/'·'\'·'..' 금지) — 파일은 FS 작업 디렉터리에 놓인다 */
+  private static checkPath(path: string): void {
+    if (!path || path.includes("/") || path.includes("\\") || path.includes("..")) {
+      throw new Error(`파일 이름은 경로 없이 지정해야 합니다('/'·'..' 금지): ${path}`);
+    }
+  }
+
+  /** Pyodide FS에 파일 기록. 클라이언트 캐시에 사본을 보관해 재부트 후에도 자동 복원된다.
+   *  재부트로 요청이 중단되면 reject되지만, 캐시본은 다음 ready 때 다시 기록된다 */
+  async writeFile(path: string, bytes: Uint8Array): Promise<void> {
+    RuntimeClient.checkPath(path);
+    const copy = bytes.slice(); // 캐시본 — 호출자 버퍼·transfer와 분리
+    this.fileCache.set(path, copy);
+    const send = copy.slice();
+    const id = this.nextId++;
+    const res = await this.request(
+      { t: "writeFile", id, path, bytes: send.buffer },
+      { transfer: [send.buffer] },
+    );
+    if (res.t === "fileError") throw new Error(res.message);
+  }
+
+  /** Pyodide FS에서 파일 읽기(파이썬 코드가 만든 파일 포함). 없으면 reject(한국어 메시지) */
+  async readFile(path: string): Promise<Uint8Array> {
+    RuntimeClient.checkPath(path);
+    const id = this.nextId++;
+    const res = await this.request({ t: "readFile", id, path });
+    if (res.t === "fileError") throw new Error(res.message);
+    return new Uint8Array((res as Extract<WorkerToMain, { t: "fileRead" }>).bytes);
+  }
+
+  /** writeFile로 쓴(캐시된) 파일 이름 목록. 워커 왕복 없음 — UI 칩 표시용.
+   *  `_`로 시작하는 이름은 내부용(모델 적합 등)이므로 UI에서 걸러도 된다 */
+  listFiles(): string[] {
+    return [...this.fileCache.keys()];
   }
 }
 

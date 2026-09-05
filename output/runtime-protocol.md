@@ -56,6 +56,8 @@
 | `repl` | id, code | 콘솔 실행(공유 네임스페이스) |
 | `inspect` | id | 전역 변수 목록 |
 | `resetRuntime` | id, initScript | 워커 안 best-effort 리셋(사용자 전역 삭제 → 초기화 스크립트 재실행) |
+| `writeFile` | id, path, bytes: ArrayBuffer | Pyodide FS에 파일 기록(`FS.writeFile`). bytes는 **transferable**. path 검증은 클라이언트 담당 |
+| `readFile` | id, path | FS 파일 읽기 → `fileRead` / 실패 시 `fileError` |
 
 ### 워커 → 메인 (`WorkerToMain`)
 
@@ -71,6 +73,9 @@
 | `replResult` | id, repr, stdout:'', stderr:'', traceback? | repr = 마지막 표현식의 `repr()`, None이면 null. stdout/stderr 필드는 빈 문자열(이미 스트리밍됨) |
 | `variables` | id, vars: VariableInfo[] | name·type·shape(2D만)·summary(repr ≤80자). 모듈·함수·클래스·`_` 이름 제외 |
 | `resetDone` | id | 리셋 완료 |
+| `fileWritten` | id | writeFile 성공 |
+| `fileRead` | id, bytes: ArrayBuffer | readFile 성공. bytes는 **transferable**(Emscripten readFile의 새 버퍼) |
+| `fileError` | id, message | writeFile/readFile 실패. `파일을 찾을 수 없습니다: …` / `파일 쓰기 실패(…): …` / 준비 전 호출 |
 
 ## 실행 의미론 (run/repl 공통)
 
@@ -139,6 +144,29 @@ RunSuccess.outputs?: OutputItem[]                        // 요청 순서 그대
 - **객체 모드**(`'object'`): `kind` 분류 — DataFrame/Series→`'table'`(preview: columns·dtypes·상위 100행·shape, NaN/NaT→null), Figure→`'image'`(`imagePng: ArrayBuffer` transferable, PNG dpi150), 스칼라류→`'scalar'`(preview repr), 그 외→`'object'`(preview repr, 2000자 절단).
 - 변환 자체가 예상 밖으로 실패하면 `errorType:"ConversionError"`.
 
+## 파일 I/O (R4) — `writeFile` / `readFile` / `listFiles`
+
+- `client.writeFile(path, bytes: Uint8Array): Promise<void>` — Pyodide FS(작업 디렉터리)에 파일 기록.
+  `client.readFile(path): Promise<Uint8Array>` — FS 파일 읽기(**파이썬 코드가 만든 파일도 읽는다**).
+  둘 다 다른 요청처럼 **준비 전 큐잉**된다.
+- **path는 경로 없는 파일 이름만**: `/`·`\`·`..`·빈 문자열은 클라이언트가 즉시 reject
+  (`파일 이름은 경로 없이 지정해야 합니다('/'·'..' 금지): …`) — 워커로 나가지 않는다.
+- **재부트 재기록**: `terminateAndReboot()`는 워커 FS를 날린다. 클라이언트가 `writeFile`한 파일의
+  사본을 `Map<path, Uint8Array>`로 캐시해 두고 **매 ready 때 큐 flush보다 먼저** 전부 다시 쓴다
+  (재기록 응답은 추적하지 않는 best-effort) — 인터럽트·타임아웃 재부트 후에도 데이터가 살아남는다.
+  진행 중이던 writeFile/readFile **요청 자체**는 재부트 시 다른 요청처럼 reject된다.
+- `client.listFiles(): string[]` — 캐시된(클라이언트가 쓴) 파일 이름 목록. 워커 왕복 없음(UI 칩 표시용).
+  파이썬이 만든 파일은 목록에 없다. **`_`로 시작하는 이름은 내부용**(모델 적합 등) — UI에서 걸러도 된다.
+- 전송: writeFile의 bytes(클라이언트 사본에서 뜬 복사본)와 fileRead의 bytes 모두 ArrayBuffer **transferable**.
+
+### 모델 적합 어댑터 (R5, `lib/reference/fit-runner.ts`)
+
+`runDistributionFit(payload, onPhase)` — FIT_SCRIPT(`lib/reference/pyFit.ts`, 단일 원본)를 워커 런타임에서 실행:
+`boot`(멱등 부트) → `pkg`(`import scipy; del scipy` repl — 워커의 loadPackagesFromImports가 scipy 다운로드) →
+`run`(`_fit_input.json`·`_fit_script.py` writeFile → `exec(compile(open(...).read()), {빈 dict})` repl → `_fit_output.json` readFile → JSON.parse).
+FIT_SCRIPT 꼬리만 소스와 다르다: `json.dumps(OUT)` 반환 대신 `_fit_output.json`에 json.dump(repl repr 파싱은 취약).
+빈 dict exec라 사용자 전역에 이름이 남지 않는다. 검증: `tests/pyodide/fit.test.ts`(`npm run test:py`).
+
 ## 타임아웃 · 인터럽트 · 재부트
 
 - run/repl마다 타임아웃(기본 60초, `timeoutSec` 인자·`defaultTimeoutSec`으로 조정). 만료 시 `client.interrupt()`.
@@ -157,6 +185,9 @@ repl(code, timeoutSec?): Promise<{ repr: string | null; traceback?: string }>
 analyze(code): Promise<string[]>             // 비리터럴 인수 → reject(Error(한국어 메시지))
 inspect(): Promise<VariableInfo[]>
 reset(initScript?): Promise<void>            // 새 스크립트로 리셋 가능. 주면 이후 재부트에도 그 스크립트 사용
+writeFile(path, bytes: Uint8Array): Promise<void>  // FS 기록 + 캐시(재부트 후 자동 재기록)
+readFile(path): Promise<Uint8Array>          // FS 읽기. 없으면 reject(한국어 메시지)
+listFiles(): string[]                        // 캐시된 파일 이름(워커 왕복 없음). '_' 접두 = 내부용
 interrupt(): void
 terminateAndReboot(): Promise<void>
 on(event, fn): () => void                    // 'progress' | 'status' | 'stdout' | 'stderr' | 'reboot'

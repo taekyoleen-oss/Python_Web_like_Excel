@@ -136,7 +136,11 @@ export type MainToWorker =
     }
   | { t: "repl"; id: number; code: string }
   | { t: "inspect"; id: number }
-  | { t: "resetRuntime"; id: number; initScript: string };
+  | { t: "resetRuntime"; id: number; initScript: string }
+  /** Pyodide FS에 파일 기록. path는 경로 없는 파일 이름만(클라이언트가 검증). bytes는 transferable */
+  | { t: "writeFile"; id: number; path: string; bytes: ArrayBuffer }
+  /** Pyodide FS에서 파일 읽기 → fileRead(bytes transferable) / 없으면 fileError */
+  | { t: "readFile"; id: number; path: string };
 
 // ── 워커 → 메인 ──────────────────────────────────────────
 
@@ -158,7 +162,11 @@ export type WorkerToMain =
       traceback?: string;
     }
   | { t: "variables"; id: number; vars: VariableInfo[] }
-  | { t: "resetDone"; id: number };
+  | { t: "resetDone"; id: number }
+  | { t: "fileWritten"; id: number }
+  | { t: "fileRead"; id: number; bytes: ArrayBuffer }
+  /** writeFile/readFile 실패(파일 없음·FS 오류 등). 한국어 메시지 */
+  | { t: "fileError"; id: number; message: string };
 
 export const DEFAULT_PYODIDE_INDEX_URL =
   "https://cdn.jsdelivr.net/pyodide/v314.0.6/full/";

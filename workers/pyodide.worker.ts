@@ -371,6 +371,42 @@ function handleInspect(msg: Extract<MainToWorker, { t: "inspect" }>): void {
   }
 }
 
+// ── 파일 I/O (R4) — path 검증은 클라이언트(writeFile/readFile)가 담당한다 ──
+
+function handleWriteFile(msg: Extract<MainToWorker, { t: "writeFile" }>): void {
+  const py = pyodide;
+  if (!py) {
+    post({ t: "fileError", id: msg.id, message: "런타임이 아직 준비되지 않았습니다" });
+    return;
+  }
+  try {
+    py.FS.writeFile(msg.path, new Uint8Array(msg.bytes));
+    post({ t: "fileWritten", id: msg.id });
+  } catch (err) {
+    post({
+      t: "fileError",
+      id: msg.id,
+      message: `파일 쓰기 실패(${msg.path}): ${err instanceof Error ? err.message : String(err)}`,
+    });
+  }
+}
+
+function handleReadFile(msg: Extract<MainToWorker, { t: "readFile" }>): void {
+  const py = pyodide;
+  if (!py) {
+    post({ t: "fileError", id: msg.id, message: "런타임이 아직 준비되지 않았습니다" });
+    return;
+  }
+  try {
+    // Emscripten readFile은 새로 할당한 Uint8Array를 돌려준다 → buffer 통째로 transfer
+    const bytes = py.FS.readFile(msg.path) as Uint8Array;
+    const buf = bytes.buffer as ArrayBuffer;
+    post({ t: "fileRead", id: msg.id, bytes: buf }, [buf]);
+  } catch {
+    post({ t: "fileError", id: msg.id, message: `파일을 찾을 수 없습니다: ${msg.path}` });
+  }
+}
+
 async function handleReset(msg: Extract<MainToWorker, { t: "resetRuntime" }>): Promise<void> {
   const py = pyodide;
   if (py) {
@@ -401,6 +437,12 @@ async function dispatch(msg: MainToWorker): Promise<void> {
       return;
     case "resetRuntime":
       return handleReset(msg);
+    case "writeFile":
+      handleWriteFile(msg);
+      return;
+    case "readFile":
+      handleReadFile(msg);
+      return;
     default:
       return;
   }

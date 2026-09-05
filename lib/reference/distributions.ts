@@ -589,7 +589,7 @@ function paretoStats(alpha: number, theta: number, single: boolean): StatValue[]
   const m2 = raw(2);
   const m3 = raw(3);
   const m4 = raw(4);
-  let mean: number | null = m1;
+  const mean: number | null = m1;
   let variance: number | null = null;
   let skew: number | null = null;
   let kurt: number | null = null;
