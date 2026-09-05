@@ -216,6 +216,8 @@ export interface WorkbookState {
   setOutputLabel: (blockId: string, outputId: string, label: string) => void;
   /** 한 실행의 모든 출력 반영 — 한 트랜잭션(= 한 undo 단계) */
   applyOutputResults: (blockId: string, results: OutputApply[]) => void;
+  /** 이미지 blob 사후 패치 — 비동기 저장 완료 후 last.imageBlobId만 갱신 (히스토리 무관) */
+  patchOutputImage: (blockId: string, outputId: string, imageBlobId: string) => void;
   setBlockMarkdown: (id: string, markdown: string) => void;
   setBlockTitle: (id: string, title: string) => void;
   setBlockCollapsed: (id: string, collapsed: boolean) => void;
@@ -830,6 +832,16 @@ export const createWorkbookStore = () => {
               for (const b of state.workbook.pyBlocks) b.collapsed = collapsed || undefined;
             }),
 
+          patchOutputImage: (blockId, outputId, imageBlobId) =>
+            set((state) => {
+              const block = state.workbook.pyBlocks.find((b) => b.id === blockId);
+              const binding = block?.outputs?.find((o) => o.id === outputId);
+              if (!binding?.last) return;
+              binding.last.imageBlobId = imageBlobId;
+              if (block && block.outputs?.[0]?.id === outputId && block.last) {
+                block.last.imageBlobId = imageBlobId; // 레거시 뷰 동기화
+              }
+            }),
           applyOutputResults: (blockId, results) =>
             set((state) => {
               const block = state.workbook.pyBlocks.find((b) => b.id === blockId);

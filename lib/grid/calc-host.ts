@@ -228,22 +228,10 @@ export const calcHost: CalcHost = {
       return;
     }
 
-    void (async () => {
-      // 객체 모드 이미지: 먼저 저장하고 id만 결과에 싣는다 (실패하면 생략)
-      const blobIds = new Map<string, string>();
-      await Promise.all(
-        items.map(async ({ outputId, item }) => {
-          if (!item.ok || !item.imagePng) return;
-          try {
-            const id = crypto.randomUUID();
-            await putBlob(id, new Blob([item.imagePng], { type: "image/png" }));
-            blobIds.set(outputId, id);
-          } catch {
-            /* blob 저장 실패 → 미리보기만 없음 */
-          }
-        }),
-      );
-      if (runSeq.get(blockId) !== seq) return; // 그 사이 새 실행 결과가 도착함
+    {
+      // 셀 반영은 반드시 **동기**여야 한다 — 엔진은 onOutputs(void) 직후 다음 블록의
+      // 스냅샷을 뜨므로, 여기서 미루면 의존 블록이 빈 spill을 읽는다(G4 회귀).
+      // 이미지 blob 저장만 반영 후 비동기로 하고 imageBlobId를 사후 패치한다.
       const st = getState();
       const block = st.workbook.pyBlocks.find((b) => b.id === blockId);
       if (!block) return;
@@ -340,7 +328,7 @@ export const calcHost: CalcHost = {
           const label = `[${item.typeName ?? item.kind}${
             item.shape ? ` ${item.shape[0]}×${item.shape[1]}` : ""
           }]`;
-          write([[{ v: label, t: "s" }]], { ...base, imageBlobId: blobIds.get(outputId) });
+          write([[{ v: label, t: "s" }]], base);
           flash ??= {
             sheetId: sheet.id,
             range: {
@@ -357,7 +345,23 @@ export const calcHost: CalcHost = {
         st.setFlash(flash);
         setTimeout(() => getState().setFlash(null), 400);
       }
-    })();
+      // 이미지 blob 사후 저장 — 실패하면 미리보기만 없음. 새 실행이 오면 폐기(seq 가드).
+      for (const { outputId, item } of items) {
+        if (!item.ok || !item.imagePng) continue;
+        const png = item.imagePng;
+        void (async () => {
+          try {
+            const id = crypto.randomUUID();
+            await putBlob(id, new Blob([png], { type: "image/png" }));
+            if (runSeq.get(blockId) === seq) {
+              getState().patchOutputImage(blockId, outputId, id);
+            }
+          } catch {
+            /* blob 저장 실패 → 미리보기만 없음 */
+          }
+        })();
+      }
+    }
   },
 };
 
