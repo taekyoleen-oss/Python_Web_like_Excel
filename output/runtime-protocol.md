@@ -79,6 +79,11 @@
 
 ## 실행 의미론 (run/repl 공통)
 
+0. **엑셀 엔진 지연 설치** (R5): 코드가 `EXCEL_CODE_RE`(protocol.ts — `read_excel|to_excel|ExcelWriter|\.xlsx|\.xls\b`)에
+   걸리면 세션당 1회 `loadPackage("openpyxl")`, 실패 시 micropip(PyPI) 폴백(pyimport로 실행 — 사용자 전역 오염 없음).
+   **314.0.6 배포판에는 openpyxl이 없어 실경로는 micropip 폴백이다** — `tests/pyodide/excel.test.ts`가 체인 전체를 검증.
+   프라미스 캐시라 이후 실행은 대기 없이 통과. 설치 실패는 stderr 한 줄
+   (`엑셀 지원(openpyxl) 설치 실패 — …`)로만 알리고 실행은 계속된다(그때 사용자 코드가 원래의 ImportError를 낸다).
 1. `loadPackagesFromImports(code)` (오류 무시 — 구문 오류는 실행 단계에서 더 나은 트레이스백으로 보고)
 2. `_pygrid_mpl_setup()` (멱등)
 3. **run만**: `msg.snapshots`(JSON)를 `_pygrid_xl_load`로 워커 내부 캐시에 주입. 실행이 끝나면(finally) 캐시를 비운다 — 스냅샷은 요청 단위로만 유효하다.

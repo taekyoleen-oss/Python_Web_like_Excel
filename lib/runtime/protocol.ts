@@ -173,5 +173,9 @@ export const DEFAULT_PYODIDE_INDEX_URL =
 
 export const BOOT_PACKAGES = ["numpy", "pandas"];
 
+/** 코드가 엑셀 API를 쓰는지 감지 — Pyodide 314 배포판에 엑셀 엔진이 선로드되지 않아
+ *  워커가 이 게이트에 걸리면 openpyxl을 지연 설치한다(loadPackage → micropip 폴백, 세션당 1회) */
+export const EXCEL_CODE_RE = /read_excel|to_excel|ExcelWriter|\.xlsx|\.xls\b/;
+
 /** 인터럽트: 버퍼[0]=2 (SIGINT) */
 export const INTERRUPT_SIGINT = 2;

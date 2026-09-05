@@ -3,7 +3,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { RuntimeClient } from "@/lib/runtime/client";
-import type { MainToWorker, WorkerToMain } from "@/lib/runtime/protocol";
+import { EXCEL_CODE_RE, type MainToWorker, type WorkerToMain } from "@/lib/runtime/protocol";
 
 // client.ts의 `import initDefaultPy from "./py/init_default.py"`(webpack asset/source)를 대체
 vi.mock("@/lib/runtime/py/init_default.py", () => ({ default: "# init" }));
@@ -140,5 +140,31 @@ describe("RuntimeClient 파일 I/O", () => {
     const dataMsg = w2.writes().find((x) => x.msg.path === "data.json")!.msg;
     expect(new Uint8Array(dataMsg.bytes)).toEqual(new Uint8Array([7, 8]));
     expect(c.listFiles().sort()).toEqual(["data.json", "late.json"]);
+  });
+});
+
+describe("EXCEL_CODE_RE — 워커 openpyxl 지연 설치 게이트", () => {
+  test("엑셀 API 사용 코드에 매치", () => {
+    for (const code of [
+      'pd.read_excel("data.xlsx")',
+      "df.to_excel('out.xlsx', index=False)",
+      'with pd.ExcelWriter("r.xlsx") as w: pass',
+      'open("legacy.xls")',
+      'files = ["a.xlsx", "b.csv"]',
+    ]) {
+      expect(EXCEL_CODE_RE.test(code)).toBe(true);
+    }
+  });
+
+  test("무관한 코드에 비매치", () => {
+    for (const code of [
+      'pd.read_csv("data.csv")',
+      "excelsior = 1",
+      'x = "xlsx"', // 확장자 점(.) 없음
+      'open("macro.xlsm")', // \\.xls\\b — s 뒤 m은 단어 경계 아님
+      "df.to_csv('out.csv')",
+    ]) {
+      expect(EXCEL_CODE_RE.test(code)).toBe(false);
+    }
   });
 });

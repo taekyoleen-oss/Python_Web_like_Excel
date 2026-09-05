@@ -4,13 +4,14 @@
 
 import type { PyodideInterface } from "pyodide";
 
-import type {
-  MainToWorker,
-  OutCell,
-  OutputItem,
-  PreviewPayload,
-  VariableInfo,
-  WorkerToMain,
+import {
+  EXCEL_CODE_RE,
+  type MainToWorker,
+  type OutCell,
+  type OutputItem,
+  type PreviewPayload,
+  type VariableInfo,
+  type WorkerToMain,
 } from "../lib/runtime/protocol";
 import bootstrapPy from "../lib/runtime/py/bootstrap.py";
 import convertPy from "../lib/runtime/py/convert.py";
@@ -55,8 +56,39 @@ async function pyRun(py: PyodideInterface, code: string): Promise<PyRunResult> {
   return JSON.parse(raw) as PyRunResult;
 }
 
+/** 엑셀 엔진(openpyxl) 지연 설치 — Pyodide 314 배포판은 엑셀 엔진 미선로드라 pd.read_excel이
+ *  ImportError를 낸다. 코드가 엑셀 API를 쓰면 세션당 1회만 설치를 시도한다(프라미스 캐시).
+ *  loadPackage(배포판) 실패 시 micropip(PyPI) 폴백. 실패해도 실행은 계속 — stderr로만 알린다.
+ *  micropip은 pyimport로 다뤄 사용자 전역에 이름을 남기지 않는다(PyProxy는 워커 안에만). */
+let excelSupport: Promise<void> | null = null;
+
+function ensureExcelSupport(py: PyodideInterface, code: string): Promise<void> {
+  if (!EXCEL_CODE_RE.test(code)) return Promise.resolve();
+  excelSupport ??= (async () => {
+    try {
+      await py.loadPackage("openpyxl");
+    } catch {
+      try {
+        await py.loadPackage("micropip");
+        const micropip = py.pyimport("micropip") as { install(pkg: string): Promise<void> };
+        await micropip.install("openpyxl");
+      } catch (err) {
+        post({
+          t: "stderr",
+          id: currentRunId,
+          chunk: `엑셀 지원(openpyxl) 설치 실패 — read_excel/to_excel을 쓸 수 없습니다: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        });
+      }
+    }
+  })();
+  return excelSupport;
+}
+
 /** import 기반 패키지 지연 로드 + matplotlib이 로드됐다면 Agg·폰트 설정(멱등) */
 async function loadImports(py: PyodideInterface, code: string): Promise<void> {
+  await ensureExcelSupport(py, code); // 내부에서 모든 실패를 삼킨다 — 실행을 막지 않는다
   try {
     await py.loadPackagesFromImports(code);
   } catch {
