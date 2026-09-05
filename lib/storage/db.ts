@@ -16,6 +16,10 @@ export interface AppSettings {
   dateOrder?: "ymd" | "mdy";
   /** 목차 전용 패널 열림 (기본 false) */
   tocOpen?: boolean;
+  /** 상단 뷰 전환 — 워크북 | 데이터 예제/분석 (부록 E, 기본 'workbook') */
+  view?: "workbook" | "reference";
+  /** 참조 뷰의 마지막 활성 탭 (excel | methods | dist | fit) */
+  referenceTab?: string;
 }
 
 const DB_NAME = "pygrid";

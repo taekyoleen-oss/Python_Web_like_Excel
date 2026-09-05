@@ -25,6 +25,15 @@ import {
 import Header from "@/components/shell/Header";
 import { RuntimeStatus } from "@/components/shell/RuntimeStatus";
 import StatusBar from "@/components/shell/StatusBar";
+import dynamic from "next/dynamic";
+
+// 참조 콘텐츠(~1MB 정적 데이터 + KaTeX)는 첫 전환 시에만 로드 — 워크북 첫 페인트 보호
+const ReferenceView = dynamic(() => import("@/components/reference/ReferenceView"), {
+  ssr: false,
+  loading: () => (
+    <p className="p-8 text-center text-sm text-muted-foreground">참조 콘텐츠 불러오는 중…</p>
+  ),
+});
 import { parseClipboard } from "@/lib/grid/clipboard/parse";
 import { serializeRange } from "@/lib/grid/clipboard/serialize";
 import { useWorkbookStore } from "@/lib/grid/model";
@@ -74,6 +83,13 @@ export default function WorkbookShell() {
   const [pyCollapsed, setPyCollapsed] = useState(false);
   const [mobileView, setMobileView] = useState<MobileView>("grid");
   const tocOpen = useWorkbookStore((s) => s.tocOpen);
+  // 부록 E R2: 뷰 전환 — 두 뷰 모두 마운트 유지(런타임·상태 보존), 비활성은 hidden
+  const view = useWorkbookStore((s) => s.view);
+  // 참조 뷰는 처음 활성화될 때 마운트하고 이후에는 hidden으로만 감춘다(상태 보존)
+  const [refMounted, setRefMounted] = useState(false);
+  useEffect(() => {
+    if (view === "reference") setRefMounted(true);
+  }, [view]);
   const closeToc = () => {
     useWorkbookStore.getState().setTocOpen(false);
     void saveSettings({ tocOpen: false });
@@ -118,6 +134,8 @@ export default function WorkbookShell() {
       );
     };
     const onKeyDown = (e: KeyboardEvent) => {
+      // 참조 뷰에서는 워크북 단축키(블록 추가·undo·패널 포커스)가 동작하지 않는다 (부록 E R2)
+      if (useWorkbookStore.getState().view === "reference") return;
       // 출력 위치 지정 취소 (§ 앵커 재지정)
       if (e.key === "Escape" && useWorkbookStore.getState().anchorPicking) {
         useWorkbookStore.getState().setAnchorPicking(null);
@@ -152,6 +170,7 @@ export default function WorkbookShell() {
   // 그리드 포커스 상태의 붙여넣기/복사 — glide 내장 copy/paste는 SheetGrid에서 꺼 둠
   useEffect(() => {
     const onPaste = (e: ClipboardEvent) => {
+      if (useWorkbookStore.getState().view === "reference") return; // 참조 뷰: 그리드 붙여넣기 금지
       if (isTextInput(e.target) || !e.clipboardData) return;
       const html = e.clipboardData.getData("text/html") || undefined;
       const text = e.clipboardData.getData("text/plain") || undefined;
@@ -160,6 +179,7 @@ export default function WorkbookShell() {
       void startPasteFlow(parseClipboard({ html, text }));
     };
     const onCopy = (e: ClipboardEvent) => {
+      if (useWorkbookStore.getState().view === "reference") return; // 참조 뷰: 페이지 텍스트 복사에 양보
       if (isTextInput(e.target) || !e.clipboardData) return;
       const domSelection = window.getSelection();
       if (domSelection && !domSelection.isCollapsed) return; // 페이지 텍스트 선택 중 → 기본 복사에 양보
@@ -188,6 +208,7 @@ export default function WorkbookShell() {
         if (settings?.splitRatio) setSplitRatio(settings.splitRatio);
         if (settings?.bottomPanelHeight) setBottomHeight(settings.bottomPanelHeight);
         if (settings?.tocOpen) useWorkbookStore.getState().setTocOpen(true);
+        if (settings?.view === "reference") useWorkbookStore.getState().setView("reference");
         const wb = settings?.lastWorkbookId
           ? await getWorkbook(settings.lastWorkbookId)
           : undefined;
@@ -240,6 +261,8 @@ export default function WorkbookShell() {
         <Header>
           <RuntimeStatus client={runtime} />
         </Header>
+        {/* 워크북 뷰 — 참조 뷰 활성 시에도 마운트 유지(hidden): 런타임·그리드 상태 보존 */}
+        <div className={view === "workbook" ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
         <GridToolbar />
         <main className="flex min-h-0 flex-1 flex-col">
         {tier === "md" || tier === "sm" ? (
@@ -355,6 +378,14 @@ export default function WorkbookShell() {
           </ResizablePanelGroup>
         )}
         </main>
+        </div>
+        {/* 참조 뷰(데이터 예제/분석) — 항상 마운트, 비활성 시 hidden (부록 E R2) */}
+        <div
+          data-testid="reference-view"
+          className={view === "reference" ? "min-h-0 flex-1 overflow-hidden" : "hidden"}
+        >
+          {refMounted ? <ReferenceView /> : null}
+        </div>
         <StatusBar saveStatus={saveStatus} />
         <PasteImportDialog />
       </div>

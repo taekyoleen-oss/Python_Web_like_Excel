@@ -1,6 +1,6 @@
 "use client";
 
-// 헤더 — 로고 · 편집 가능한 워크북 제목 · 파일 메뉴 자리표시 · 런타임 상태 슬롯
+// 헤더 — 로고 · 편집 가능한 워크북 제목 · 파일 메뉴 · 뷰 전환(워크북|데이터 예제/분석) · 런타임 상태 슬롯
 
 import { useState, type ReactNode } from "react";
 import FileMenu from "@/components/shell/FileMenu";
@@ -8,6 +8,48 @@ import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useWorkbookStore } from "@/lib/grid/model";
+import { saveSettings } from "@/lib/storage/db";
+
+/** 상단 뷰 전환 세그먼트 (부록 E R2) — 두 뷰 모두 마운트 유지, 선택은 설정에 저장 */
+function ViewSwitch() {
+  const view = useWorkbookStore((s) => s.view);
+  const select = (v: "workbook" | "reference") => {
+    useWorkbookStore.getState().setView(v);
+    void saveSettings({ view: v });
+  };
+  const cls = (active: boolean) =>
+    `rounded px-2.5 py-1 text-xs transition-colors ${
+      active
+        ? "bg-background font-medium text-foreground shadow-sm"
+        : "text-muted-foreground hover:text-foreground"
+    }`;
+  return (
+    <div
+      role="tablist"
+      aria-label="화면 뷰 전환"
+      className="ml-1 flex shrink-0 items-center gap-0.5 rounded-md bg-muted p-0.5"
+    >
+      <button
+        role="tab"
+        aria-selected={view === "workbook"}
+        data-testid="view-workbook"
+        onClick={() => select("workbook")}
+        className={cls(view === "workbook")}
+      >
+        워크북
+      </button>
+      <button
+        role="tab"
+        aria-selected={view === "reference"}
+        data-testid="view-reference"
+        onClick={() => select("reference")}
+        className={cls(view === "reference")}
+      >
+        데이터 예제/분석
+      </button>
+    </div>
+  );
+}
 
 export default function Header({ children }: { children?: ReactNode }) {
   const title = useWorkbookStore((s) => s.workbook.title);
@@ -49,6 +91,7 @@ export default function Header({ children }: { children?: ReactNode }) {
         </button>
       )}
       <FileMenu />
+      <ViewSwitch />
       <Tooltip>
         <TooltipTrigger asChild>
           <button

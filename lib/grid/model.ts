@@ -144,6 +144,8 @@ export interface WorkbookState {
   anchorPicking: AnchorPickTarget | null;
   /** 목차 패널 열림 (설정에 저장, undo 대상 아님) */
   tocOpen: boolean;
+  /** 상단 뷰 전환 — 워크북 | 데이터 예제/분석 (부록 E, 설정에 저장, undo 대상 아님) */
+  view: "workbook" | "reference";
   /** spill 잠김(src) 셀이면 false를 반환하고 아무것도 바꾸지 않는다 */
   setCellValue: (sheetId: string, r: number, c: number, cell: Cell | null) => boolean;
   /** 일괄 편집 = 한 트랜잭션 = 한 undo 단계 */
@@ -242,6 +244,7 @@ export interface WorkbookState {
   setLastEditorBlock: (id: string | null) => void;
   setAnchorPicking: (target: AnchorPickTarget | null) => void;
   setTocOpen: (open: boolean) => void;
+  setView: (view: "workbook" | "reference") => void;
 }
 
 const norm = (rg: CellRange): CellRange => ({
@@ -338,6 +341,7 @@ export const createWorkbookStore = () => {
           lastEditorBlockId: null,
           anchorPicking: null,
           tocOpen: false,
+          view: "workbook" as const,
 
           setCellValue: (sheetId, r, c, cell) => {
             const sheet = get().workbook.sheets.find((s) => s.id === sheetId);
@@ -935,6 +939,11 @@ export const createWorkbookStore = () => {
           setTocOpen: (open) =>
             set((state) => {
               state.tocOpen = open;
+            }),
+
+          setView: (view) =>
+            set((state) => {
+              state.view = view;
             }),
         };
       }),

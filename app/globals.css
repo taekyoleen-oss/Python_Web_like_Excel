@@ -110,3 +110,68 @@
     font-variant-numeric: tabular-nums;
   }
 }
+
+/* ── 참조 뷰(데이터 예제/분석) — 소스(insurance-insights-board) 칩 뮤트 팔레트 (부록 E) ── */
+:root {
+  --chip-blue-bg: #e8eef9;
+  --chip-blue-fg: #2b4a8c;
+  --chip-teal-bg: #e3f1ef;
+  --chip-teal-fg: #1f6e64;
+  --chip-amber-bg: #f7eedc;
+  --chip-amber-fg: #7d5a14;
+  --chip-rose-bg: #f8e8e6;
+  --chip-rose-fg: #a03e33;
+  --chip-violet-bg: #eee9f7;
+  --chip-violet-fg: #5b4493;
+  --chip-green-bg: #e7f2e4;
+  --chip-green-fg: #3d6b2f;
+  --chip-slate-bg: #eaedf1;
+  --chip-slate-fg: #475266;
+  --chip-cyan-bg: #e2f0f6;
+  --chip-cyan-fg: #1d6486;
+}
+
+/* 파이썬 코드 경량 하이라이트 (참조 뷰 code-popup) — 칩 뮤트 팔레트 한정 스코프 */
+.py-tok-comment {
+  color: color-mix(in srgb, var(--chip-slate-fg) 72%, white);
+}
+.py-tok-str {
+  color: var(--chip-teal-fg);
+}
+.py-tok-num {
+  color: var(--chip-rose-fg);
+}
+.py-tok-kw {
+  color: var(--chip-violet-fg);
+  font-weight: 600;
+}
+.py-tok-fn {
+  color: var(--primary);
+  font-weight: 600;
+}
+.py-tok-kwarg {
+  color: var(--chip-amber-fg);
+}
+
+/* 사분면 클라우드 용어 항목 — hover 확대(소스와 동일) */
+.method-term {
+  transition:
+    transform 0.18s ease,
+    color 0.2s ease,
+    background-color 0.2s ease;
+  transform-origin: center;
+  cursor: pointer;
+}
+.method-term:hover,
+.method-term:focus-visible {
+  transform: scale(1.12);
+  background: rgba(255, 255, 255, 0.85);
+}
+@media (prefers-reduced-motion: reduce) {
+  .method-term,
+  .method-term:hover,
+  .method-term:focus-visible {
+    transition: none;
+    transform: none;
+  }
+}
