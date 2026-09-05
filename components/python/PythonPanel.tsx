@@ -5,6 +5,7 @@
 
 import { useMemo } from "react";
 import { Button } from "@/components/ui/button";
+import { AiGenerateBar } from "@/components/python/AiAssist";
 import InitScriptDialog from "@/components/python/InitScriptDialog";
 import PyBlockCard from "@/components/python/PyBlockCard";
 import SnippetMenu from "@/components/python/SnippetMenu";
@@ -62,6 +63,7 @@ export default function PythonPanel() {
           <InitScriptDialog />
         </div>
       </div>
+      <AiGenerateBar />
 
       <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-2">
         {blocks.length === 0 ? (

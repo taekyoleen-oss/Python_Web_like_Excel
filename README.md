@@ -17,6 +17,10 @@ npm run build && npm start   # 프로덕션
 
 첫 방문 시 생명표 샘플 워크북이 열리고, Pyodide(numpy·pandas)는 jsDelivr CDN에서 백그라운드 로드됩니다(약 10초, 재방문은 브라우저 캐시). matplotlib 등은 첫 import 때 지연 로드됩니다.
 
+## AI 설정 (선택)
+
+✦ AI 코드 지원(블록 생성·제안·변수 반영·에러분석)을 쓰려면 **파일 > AI 설정**에서 Anthropic API 키를 입력하세요(발급: [console.anthropic.com](https://console.anthropic.com)). 키는 이 브라우저의 IndexedDB에만 저장되며 Anthropic API 호출에만 사용됩니다 — 서버 라우트가 없고, 워크북 파일·내보내기·git 어디에도 포함되지 않습니다. AI 제안은 자동 실행되지 않으며 항상 확인 후 직접 적용·실행합니다.
+
 ## 테스트
 
 ```bash

@@ -7,6 +7,7 @@ import { CaretDown } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import lifeTableSample from "@/data/sample-workbooks/life-table.pygrid.json";
 import lossRatioSample from "@/data/sample-workbooks/loss-ratio.pygrid.json";
+import ApiKeyDialog, { openApiKeyDialog } from "@/components/shell/ApiKeyDialog";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -261,6 +262,7 @@ export default function FileMenu() {
               </DropdownMenuSub>
             </DropdownMenuSubContent>
           </DropdownMenuSub>
+          <DropdownMenuItem onClick={() => openApiKeyDialog()}>AI 설정…</DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem onClick={() => void exportXlsx()}>
             XLSX로 내보내기 (전 시트)
@@ -300,6 +302,8 @@ export default function FileMenu() {
           </DropdownMenuSub>
         </DropdownMenuContent>
       </DropdownMenu>
+
+      <ApiKeyDialog />
 
       {/* 데이터 불러오기 옵션 — 선택은 app settings에 기억된다 */}
       <Dialog open={pending !== null} onOpenChange={(o) => !o && setPending(null)}>

@@ -75,8 +75,8 @@ export function buildXlLoadCode(ref: string): string {
   ].join("\n");
 }
 
-/** 시트 사용 범위(A1 기준). 빈 시트는 A1 단일 셀로 폴백 */
-function usedRange(sheet: Sheet): { r0: number; c0: number; r1: number; c1: number } {
+/** 시트 사용 범위(A1 기준). 빈 시트는 A1 단일 셀로 폴백 (AI 컨텍스트 수집도 공용) */
+export function usedRange(sheet: Sheet): { r0: number; c0: number; r1: number; c1: number } {
   let maxR = 0;
   let maxC = 0;
   for (const key of Object.keys(sheet.cells)) {

@@ -46,6 +46,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { AiAssist } from "@/components/python/AiAssist";
 import CodeEditor from "@/components/python/CodeEditor";
 import { formatA1 } from "@/lib/grid/a1";
 import { notifyWorkbookEdit } from "@/lib/grid/calc-host";
@@ -741,6 +742,7 @@ export default function PyBlockCard({
                     {block.last.summaryKo}
                   </div>
                 )}
+                <AiAssist block={block} />
               </>
             )}
           </div>

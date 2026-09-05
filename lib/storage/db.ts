@@ -22,6 +22,9 @@ export interface AppSettings {
   referenceTab?: string;
   /** 데이터 불러오기 옵션 기억 (부록 E R5, 기본 시트·FS 모두 ✓ + xl 블록) */
   dataImport?: { toSheet: boolean; toFs: boolean; makeBlock: "xl" | "pandas" | "none" };
+  /** Anthropic API 키 (부록 E R6) — 이 브라우저 IndexedDB 전용.
+   *  워크북 JSON·내보내기·git 어디에도 실리지 않는다(워크북 객체와 분리 저장) */
+  anthropicApiKey?: string;
 }
 
 const DB_NAME = "pygrid";
