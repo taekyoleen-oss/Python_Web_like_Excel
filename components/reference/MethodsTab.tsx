@@ -43,7 +43,6 @@ import {
 import {
   METHOD_EXCEL_CODE,
   PIE_GENERAL_NOTE,
-  PIE_CODE_NOTE,
   PACKAGE_STATUS_META,
   noteToBullets,
   toExcelPython,
@@ -63,6 +62,7 @@ import {
 import { FunctionSearch, type SearchItem } from "@/components/reference/FunctionSearch";
 import { PlotSnippetPreview } from "@/components/reference/PlotSampleSvg";
 import { Tex } from "@/components/reference/Tex";
+import { CodeDialog } from "@/components/reference/CodeDialog";
 import { sendToWorkbook, type SendSection } from "@/lib/grid/import-blocks";
 
 /** 사분면에 배치되는 카테고리 — wrangle은 아래 접이식 패널로 분리 */
@@ -940,132 +940,6 @@ function MethodDialog({
   );
 }
 
-/* ─────────── 간단 코드 팝업 (데이터 핸들링·그래프 조각) — DistCodeDialog 간소화 ─────────── */
-
-interface CodeTab {
-  key: string;
-  label: string;
-  code: string;
-  note?: string | string[];
-}
-
-function SnippetCodeDialog({
-  name,
-  en,
-  code,
-  subtitle,
-  intro,
-  onSend,
-  onClose,
-}: {
-  name: string;
-  en: string;
-  code: string;
-  subtitle?: string;
-  /** 코드 위(탭 공통)에 표시할 프리뷰 블록 — 그래프 샘플·대표 모델·입력 형태 등 */
-  intro?: ReactNode;
-  /** '블록으로 보내기' — 파이썬 코드 탭의 코드를 워크북 블록으로 */
-  onSend: (code: string) => void;
-  onClose: () => void;
-}) {
-  // '엑셀 코드 적용' 탭 자동 추가 — 파이썬 코드를 Python in Excel용으로 변환
-  const allTabs: CodeTab[] = useMemo(
-    () => [
-      { key: "py", label: "파이썬 코드 적용", code },
-      { key: "__excel", label: "엑셀 코드 적용", code: toExcelPython(code), note: PIE_CODE_NOTE },
-    ],
-    [code],
-  );
-  const [tabKey, setTabKey] = useState<string>("py");
-  const active = allTabs.find((t) => t.key === tabKey) ?? allTabs[0];
-  const [fontScale, setFontScale] = useState(1);
-
-  return (
-    <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent
-        aria-describedby={undefined}
-        className="flex max-h-[84vh] w-full flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl"
-        data-testid="snippet-dialog"
-      >
-        <header className="flex items-start justify-between gap-3 border-b px-5 py-4 pr-12 sm:px-6">
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-2xl" aria-hidden>
-                🐍
-              </span>
-              <DialogTitle className="font-sans text-[18px] font-semibold text-foreground">
-                {name}
-              </DialogTitle>
-              <span className="text-[13px] text-muted-foreground">{en}</span>
-            </div>
-            {subtitle && !intro ? (
-              <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">{subtitle}</p>
-            ) : null}
-          </div>
-          <div className="flex shrink-0 items-center gap-1.5">
-            <FontScaleControl fontScale={fontScale} onFontScale={setFontScale} />
-            <CopyButton text={active.code} label="전체 복사" />
-            <button
-              type="button"
-              onClick={() => onSend(code)}
-              data-testid="snippet-send"
-              className="inline-flex items-center gap-1 whitespace-nowrap rounded border bg-card px-2 py-1 text-[11.5px] font-medium text-primary hover:bg-accent"
-              title="이 코드를 워크북의 블록으로 담고 워크북 뷰로 이동합니다 (자동 실행 없음)"
-            >
-              ▶ 블록으로 보내기
-            </button>
-          </div>
-        </header>
-
-        {intro ? <div className="px-5 pt-2 sm:px-6">{intro}</div> : null}
-
-        <div
-          role="tablist"
-          aria-label="코드 종류"
-          className="flex items-center gap-1 border-b px-5 pt-2 sm:px-6"
-        >
-          {allTabs.map((t) => (
-            <button
-              key={t.key}
-              type="button"
-              role="tab"
-              aria-selected={active.key === t.key}
-              onClick={() => setTabKey(t.key)}
-              className={`rounded-t border-b-2 px-3.5 py-1.5 text-[13px] font-medium transition-colors ${
-                active.key === t.key
-                  ? "border-primary text-foreground"
-                  : "border-transparent text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
-
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 sm:px-6">
-          {active.note ? (
-            <div
-              className="mb-4 rounded px-4 py-3 text-foreground/80"
-              style={{
-                fontSize: Math.round(13 * fontScale * 10) / 10,
-                background: "color-mix(in srgb, var(--chip-cyan-bg) 55%, white)",
-              }}
-            >
-              <span className="font-semibold text-foreground">엑셀의 Python(=PY())에서 쓰는 법</span>
-              <ul className="mt-1.5 list-disc space-y-1 pl-4 leading-[1.7] marker:text-muted-foreground">
-                {(Array.isArray(active.note) ? active.note : [active.note]).map((b, i) => (
-                  <li key={i}>{b}</li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
-          <CodeBlock code={active.code} codeFz={13.5 * fontScale} />
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
 /* ───────────────────────── 사분면 2차원 그래프 (md+) ───────────────────────── */
 
 /** 표시 폭 추정 — CJK는 fontSize, 라틴·기호는 0.58배 + 좌우 패딩 */
@@ -1726,29 +1600,23 @@ export default function MethodsTab() {
       ) : null}
 
       {snippet ? (
-        <SnippetCodeDialog
+        <CodeDialog
           name={snippet.label}
           en="데이터 핸들링"
           subtitle="선택한 데이터 핸들링 조각의 코드입니다. '엑셀 코드 적용' 탭에서 Python in Excel용도 함께 볼 수 있습니다."
           code={snippetInsertCode(snippet)}
-          onSend={(code) => {
-            sendToWorkbook(snippet.label, [{ title: snippet.label, code }]);
-            setSnippet(null);
-          }}
+          onSent={() => setSnippet(null)}
           onClose={() => setSnippet(null)}
         />
       ) : null}
 
       {plotSnip ? (
-        <SnippetCodeDialog
+        <CodeDialog
           name={plotSnip.label}
           en="그래프·시각화"
           intro={<PlotSnippetPreview snippet={plotSnip} />}
           code={plotInsertCode(plotSnip)}
-          onSend={(code) => {
-            sendToWorkbook(plotSnip.label, [{ title: plotSnip.label, code }]);
-            setPlotSnip(null);
-          }}
+          onSent={() => setPlotSnip(null)}
           onClose={() => setPlotSnip(null)}
         />
       ) : null}
