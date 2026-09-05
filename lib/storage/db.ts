@@ -20,6 +20,8 @@ export interface AppSettings {
   view?: "workbook" | "reference";
   /** 참조 뷰의 마지막 활성 탭 (excel | methods | dist | fit) */
   referenceTab?: string;
+  /** 데이터 불러오기 옵션 기억 (부록 E R5, 기본 시트·FS 모두 ✓ + xl 블록) */
+  dataImport?: { toSheet: boolean; toFs: boolean; makeBlock: "xl" | "pandas" | "none" };
 }
 
 const DB_NAME = "pygrid";

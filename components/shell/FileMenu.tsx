@@ -8,6 +8,15 @@ import { toast } from "sonner";
 import lifeTableSample from "@/data/sample-workbooks/life-table.pygrid.json";
 import lossRatioSample from "@/data/sample-workbooks/loss-ratio.pygrid.json";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -18,14 +27,16 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
 import { useWorkbookStore } from "@/lib/grid/model";
+import { importData, type ImportOptions } from "@/lib/io/data-import";
 import {
   downloadBlob,
   downloadWorkbookJson,
   parseWorkbookJson,
 } from "@/lib/io/workbook-json";
 // SheetJS(~140kB gz)는 첫 페인트를 막지 않도록 사용 시점에 동적 로드한다
-import { listWorkbooks, getWorkbook } from "@/lib/storage/db";
+import { listWorkbooks, getWorkbook, loadSettings, saveSettings } from "@/lib/storage/db";
 import { createWorkbook } from "@/lib/grid/model";
 import type { Workbook } from "@/types/workbook";
 
@@ -68,9 +79,87 @@ export async function openWorkbookFile(file: File): Promise<void> {
   }
 }
 
+/** 샘플 데이터셋 (public/samples, 부록 E.1) — 소스 SAMPLE_DATASETS 이식 */
+const SAMPLE_DATASETS = [
+  { file: "policy.xlsx", label: "policy.xlsx — 계약·고객 (600행)" },
+  { file: "claims.xlsx", label: "claims.xlsx — 청구·손해액 (600행)" },
+  { file: "experience.xlsx", label: "experience.xlsx — 경험데이터 (800행)" },
+  { file: "triangle.xlsx", label: "triangle.xlsx — 런오프 누적 삼각형" },
+  { file: "mortality_table.xlsx", label: "mortality_table.xlsx — 생명표 qx (0~100세)" },
+];
+
+const DEFAULT_IMPORT_OPTS: ImportOptions = { toSheet: true, toFs: true, makeBlock: "xl" };
+
 export default function FileMenu() {
   const inputRef = useRef<HTMLInputElement>(null);
+  const dataInputRef = useRef<HTMLInputElement>(null);
   const [recent, setRecent] = useState<Workbook[]>([]);
+  // 데이터 불러오기 (R5) — pending이 있으면 옵션 다이얼로그가 열린다
+  const [pending, setPending] = useState<{ name: string; bytes: Uint8Array } | null>(null);
+  const [impOpts, setImpOpts] = useState<ImportOptions>(DEFAULT_IMPORT_OPTS);
+  const [importing, setImporting] = useState(false);
+  const [urlOpen, setUrlOpen] = useState(false);
+  const [url, setUrl] = useState("");
+
+  /** 소스 확보 후 옵션 다이얼로그 열기 — 지난 선택(app settings)을 기본값으로 */
+  const askImport = async (name: string, bytes: Uint8Array) => {
+    const s = await loadSettings();
+    setImpOpts(s?.dataImport ?? DEFAULT_IMPORT_OPTS);
+    setPending({ name, bytes });
+  };
+
+  const loadSample = async (file: string) => {
+    try {
+      const res = await fetch(`/samples/${file}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      await askImport(file, new Uint8Array(await res.arrayBuffer()));
+    } catch (e) {
+      toast.error(`샘플을 불러오지 못했습니다: ${(e as Error).message}`);
+    }
+  };
+
+  const loadUrl = async () => {
+    const u = url.trim();
+    if (!u) return;
+    try {
+      const res = await fetch(u);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const bytes = new Uint8Array(await res.arrayBuffer());
+      let name = "data.csv";
+      try {
+        name = decodeURIComponent(new URL(u, location.href).pathname.split("/").pop() || "") || name;
+      } catch {
+        // URL 파싱 실패 — 기본 이름 사용
+      }
+      setUrlOpen(false);
+      await askImport(name, bytes);
+    } catch (e) {
+      toast.error(
+        `URL에서 불러오지 못했습니다: ${(e as Error).message} — 대상 서버가 CORS(교차 출처 요청)를 허용하지 않으면 브라우저에서 직접 받을 수 없습니다. 파일을 내려받은 뒤 "내 파일 추가"로 여세요.`,
+      );
+    }
+  };
+
+  const confirmImport = async () => {
+    if (!pending) return;
+    setImporting(true);
+    try {
+      void saveSettings({ dataImport: impOpts });
+      const res = await importData(pending.name, pending.bytes, impOpts);
+      const parts = [
+        res.sheetNames.length > 0 ? `시트 ${res.sheetNames.join(", ")}` : null,
+        impOpts.toFs ? "워커 FS" : null,
+        res.blockId ? "로드 블록" : null,
+      ].filter(Boolean);
+      toast(`"${pending.name}" 불러옴 — ${parts.join(" · ") || "반영 대상 없음"}`);
+      res.fs?.catch((e) => toast.error(`워커 FS 기록 실패: ${(e as Error).message}`));
+      setPending(null);
+    } catch (e) {
+      toast.error(`데이터 불러오기 실패: ${(e as Error).message}`);
+    } finally {
+      setImporting(false);
+    }
+  };
 
   const save = () => {
     const verdict = downloadWorkbookJson(useWorkbookStore.getState().workbook);
@@ -122,6 +211,18 @@ export default function FileMenu() {
           e.target.value = ""; // 같은 파일 재선택 허용
         }}
       />
+      <input
+        ref={dataInputRef}
+        type="file"
+        accept=".csv,.txt,.xlsx,.xls"
+        className="hidden"
+        aria-label="데이터 파일 추가"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) void f.arrayBuffer().then((b) => askImport(f.name, new Uint8Array(b)));
+          e.target.value = "";
+        }}
+      />
       <DropdownMenu onOpenChange={(open) => open && refreshRecent()}>
         <DropdownMenuTrigger asChild>
           <Button variant="ghost" size="sm" className="gap-1">
@@ -136,6 +237,30 @@ export default function FileMenu() {
             열기… (.pygrid.json / .csv / .xlsx)
           </DropdownMenuItem>
           <DropdownMenuItem onClick={save}>저장 (.pygrid.json)</DropdownMenuItem>
+          <DropdownMenuSeparator />
+          {/* 데이터 불러오기 (R5) — '열기'와 달리 현재 워크북에 추가한다 */}
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger>데이터 불러오기</DropdownMenuSubTrigger>
+            <DropdownMenuSubContent className="w-64">
+              <DropdownMenuItem onClick={() => dataInputRef.current?.click()}>
+                내 파일 추가… (.csv/.xlsx)
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setUrlOpen(true)}>
+                URL로 불러오기…
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger>샘플 데이터셋</DropdownMenuSubTrigger>
+                <DropdownMenuSubContent className="w-80">
+                  {SAMPLE_DATASETS.map((d) => (
+                    <DropdownMenuItem key={d.file} onClick={() => void loadSample(d.file)}>
+                      {d.label}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
           <DropdownMenuSeparator />
           <DropdownMenuItem onClick={() => void exportXlsx()}>
             XLSX로 내보내기 (전 시트)
@@ -175,6 +300,89 @@ export default function FileMenu() {
           </DropdownMenuSub>
         </DropdownMenuContent>
       </DropdownMenu>
+
+      {/* 데이터 불러오기 옵션 — 선택은 app settings에 기억된다 */}
+      <Dialog open={pending !== null} onOpenChange={(o) => !o && setPending(null)}>
+        <DialogContent className="max-w-[440px]">
+          <DialogHeader>
+            <DialogTitle>데이터 불러오기</DialogTitle>
+            <DialogDescription className="font-mono">{pending?.name}</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 text-sm">
+            <label className="flex items-center gap-2">
+              <Checkbox
+                checked={impOpts.toSheet}
+                onCheckedChange={(v) => setImpOpts({ ...impOpts, toSheet: v === true })}
+              />
+              시트로 표시 (CSV/XLSX는 새 시트로 추가)
+            </label>
+            <label className="flex items-center gap-2">
+              <Checkbox
+                checked={impOpts.toFs}
+                onCheckedChange={(v) => setImpOpts({ ...impOpts, toFs: v === true })}
+              />
+              워커 파일시스템에 기록 (pd.read_* 사용 가능)
+            </label>
+            <fieldset className="space-y-1.5">
+              <legend className="mb-1 text-xs text-muted-foreground">로드 블록 생성</legend>
+              {(
+                [
+                  ["xl", "xl() 참조 (권장)"],
+                  ["pandas", "pandas 코드 (pd.read_*)"],
+                  ["none", "만들지 않음"],
+                ] as const
+              ).map(([v, label]) => (
+                <label key={v} className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name="makeBlock"
+                    value={v}
+                    checked={impOpts.makeBlock === v}
+                    onChange={() => setImpOpts({ ...impOpts, makeBlock: v })}
+                  />
+                  {label}
+                </label>
+              ))}
+            </fieldset>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setPending(null)} disabled={importing}>
+              취소
+            </Button>
+            <Button onClick={() => void confirmImport()} disabled={importing}>
+              {importing ? "불러오는 중…" : "불러오기"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* URL로 불러오기 */}
+      <Dialog open={urlOpen} onOpenChange={setUrlOpen}>
+        <DialogContent className="max-w-[480px]">
+          <DialogHeader>
+            <DialogTitle>URL로 불러오기</DialogTitle>
+            <DialogDescription>
+              CSV/XLSX 파일 주소를 입력하세요. 대상 서버가 CORS(교차 출처 요청)를 허용해야
+              브라우저에서 받을 수 있습니다.
+            </DialogDescription>
+          </DialogHeader>
+          <Input
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder="https://example.com/data.csv"
+            aria-label="데이터 URL"
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void loadUrl();
+            }}
+          />
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setUrlOpen(false)}>
+              취소
+            </Button>
+            <Button onClick={() => void loadUrl()}>가져오기</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
