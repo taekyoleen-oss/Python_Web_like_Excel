@@ -16,7 +16,7 @@ import {
   type Item,
   type Theme,
 } from "@glideapps/glide-data-grid";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   ContextMenu,
@@ -565,10 +565,53 @@ export default function SheetGrid() {
     if (range) void navigator.clipboard.writeText(formatA1(range));
   };
 
+  // QA 발견(첫 글자 유실): 셀 클릭 직후 초고속 타이핑 시 오버레이 편집기 마운트 전에
+  // 캔버스로 떨어진 키가 유실된다(glide는 마지막 키 하나로만 편집기를 시드).
+  // 캡처 단계에서 인쇄 가능 키를 400ms 창으로 버퍼링했다가, 오버레이 textarea가 나타나
+  // "마지막 키 하나"로 시드된 것이 확인되면 전체 버퍼로 보정한다.
+  // IME(한글) 조합(isComposing·key.length>1)과 단축키는 관여하지 않는다.
+  const typeBuf = useRef<{ chars: string[]; ts: number }>({ chars: [], ts: 0 });
+
+  const bufferCanvasKey = useCallback((e: React.KeyboardEvent) => {
+    const t = e.target as HTMLElement;
+    if (t.tagName === "TEXTAREA" || t.tagName === "INPUT" || t.isContentEditable) return;
+    if (e.key.length !== 1 || e.ctrlKey || e.metaKey || e.altKey || e.nativeEvent.isComposing)
+      return;
+    const buf = typeBuf.current;
+    const now = performance.now();
+    if (now - buf.ts > 400) buf.chars = [];
+    buf.chars.push(e.key);
+    buf.ts = now;
+  }, []);
+
+  useEffect(() => {
+    const portal = document.getElementById("portal");
+    if (!portal) return;
+    const obs = new MutationObserver(() => {
+      const buf = typeBuf.current;
+      if (buf.chars.length < 2 || performance.now() - buf.ts > 400) return;
+      const ta = portal.querySelector("textarea, input") as
+        | HTMLTextAreaElement
+        | HTMLInputElement
+        | null;
+      if (!ta) return;
+      const want = buf.chars.join("");
+      if (ta.value !== buf.chars[buf.chars.length - 1]) return; // 시드 형태가 아니면 불개입
+      const proto =
+        ta.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+      Object.getOwnPropertyDescriptor(proto, "value")?.set?.call(ta, want);
+      ta.dispatchEvent(new Event("input", { bubbles: true }));
+      ta.setSelectionRange(want.length, want.length);
+      buf.chars = [];
+    });
+    obs.observe(portal, { childList: true, subtree: true });
+    return () => obs.disconnect();
+  }, []);
+
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
-        <div className="relative min-h-0 min-w-0 flex-1">
+        <div className="relative min-h-0 min-w-0 flex-1" onKeyDownCapture={bufferCanvasKey}>
           <DataEditor
             columns={columns}
             rows={sheet.rowCount}

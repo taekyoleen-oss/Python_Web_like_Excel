@@ -599,10 +599,11 @@ export default function PyBlockCard({
         </button>
       </div>
 
-      {/* 떠 있는 셀 툴바 — hover·포커스에서만 보이지만 DOM에는 항상 있어 Tab으로 닿는다 */}
+      {/* 떠 있는 셀 툴바 — hover·포커스에서만 보이지만 DOM에는 항상 있어 Tab으로 닿는다.
+          카드 상단 테두리에 걸치게 띄워(Colab 방식) 제목·상태 칩을 덮지 않는다 (QA 권고) */}
       <div
         data-testid="cell-toolbar"
-        className="pointer-events-none absolute right-1 top-0.5 z-10 flex items-center rounded border bg-card p-0.5 opacity-0 shadow-sm transition-opacity group-focus-within:pointer-events-auto group-focus-within:opacity-100 group-hover:pointer-events-auto group-hover:opacity-100"
+        className="pointer-events-none absolute -top-4 right-2 z-10 flex items-center rounded border bg-card p-0.5 opacity-0 shadow-sm transition-opacity group-focus-within:pointer-events-auto group-focus-within:opacity-100 group-hover:pointer-events-auto group-hover:opacity-100"
       >
         <Button
           variant="ghost"

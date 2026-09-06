@@ -134,3 +134,68 @@ test("자동 저장 후 새로고침하면 값이 복원된다", async ({ page }
     )
     .toBe("복원 확인");
 });
+
+test("셀 클릭 직후 초고속 타이핑에도 첫 글자가 유실되지 않는다 (QA 보정)", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForFunction(
+    () =>
+      typeof (window as any).__pygridStore !== "undefined" &&
+      (window as any).__pygridReady === true,
+  );
+  await page.evaluate(() => (window as any).__pygridStore.getState().newWorkbook());
+  // 캔버스 좌표 보정: 임의 지점 클릭 → 선택된 셀로 원점 역산 (행 34px·열 88px)
+  const box = (await page.locator('[data-testid="data-grid-canvas"]').boundingBox())!;
+  await page.mouse.click(box.x + 200, box.y + 100);
+  const sel = await page.evaluate(() => (window as any).__pygridStore.getState().selection);
+  const x0 = box.x + 200 - sel.c0 * 88;
+  const y0 = box.y + 100 - sel.r0 * 34;
+  // B2 클릭 즉시 지연 0ms 타이핑 — 오버레이 편집기 마운트 전에 키가 캔버스로 떨어지는 상황
+  await page.mouse.click(x0 + 1 * 88, y0 + 1 * 34);
+  await page.keyboard.type("hello", { delay: 0 });
+  // 편집기 보정(버퍼→전체 문자열)이 반영된 것을 확인한 뒤 Enter — 사용자도 화면을 보고 확정한다
+  await expect
+    .poll(
+      () =>
+        page.evaluate(
+          () =>
+            (document.getElementById("portal")?.querySelector("textarea, input") as
+              | HTMLTextAreaElement
+              | null)?.value ?? null,
+        ),
+      { timeout: 5_000 },
+    )
+    .toBe("hello");
+  await page.keyboard.press("Enter");
+  await expect
+    .poll(
+      () =>
+        page.evaluate(
+          () => (window as any).__pygridStore.getState().workbook.sheets[0].cells["1:1"]?.v ?? null,
+        ),
+      { timeout: 10_000 },
+    )
+    .toBe("hello");
+});
+
+test("hover 셀 툴바가 카드 헤더(제목·상태 칩)를 덮지 않는다 (QA 보정)", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForFunction(
+    () =>
+      typeof (window as any).__pygridStore !== "undefined" &&
+      (window as any).__pygridReady === true,
+  );
+  await page.evaluate(() => {
+    (window as any).__pygridStore.getState().newWorkbook();
+    // newWorkbook 이후엔 상태를 다시 읽어야 새 시트 id를 얻는다
+    const st = (window as any).__pygridStore.getState();
+    st.addPyBlock(st.workbook.sheets[0].id, { r: 0, c: 2 });
+  });
+  const card = page.locator('[data-block-kind="code"]').first();
+  await card.hover();
+  const toolbar = page.getByTestId("cell-toolbar");
+  await expect(toolbar).toBeVisible();
+  // 툴바 하단이 헤더 행(제목 입력)의 세로 중심보다 위 → 헤더 콘텐츠를 덮지 않는다
+  const tb = (await toolbar.boundingBox())!;
+  const title = (await card.getByLabel("블록 제목").boundingBox())!;
+  expect(tb.y + tb.height).toBeLessThanOrEqual(title.y + title.height / 2);
+});
