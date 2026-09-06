@@ -80,5 +80,5 @@ test("키 미설정 → 설정 유도 → 키 저장 → 모킹 generate → 새
   // 요청이 저장된 키·이 앱 규칙 프롬프트로 나갔는지 (모킹 라우트에서 캡처)
   expect(sentAuth).toBe("sk-ant-e2e-mock");
   expect(sentBody).toContain("claude-sonnet-4-6");
-  expect(sentBody).toContain("PyGrid Studio");
+  expect(sentBody).toContain("시트기반 파이썬");
 });

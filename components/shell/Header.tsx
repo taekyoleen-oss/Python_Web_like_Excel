@@ -64,9 +64,33 @@ export default function Header({ children }: { children?: ReactNode }) {
 
   return (
     <header className="flex h-12 shrink-0 items-center gap-3 border-b bg-background px-4">
-      <span className="font-display text-lg font-semibold tracking-tight">
-        PyGrid Studio
-      </span>
+      <div className="flex flex-col leading-none">
+        <span className="font-display text-lg font-semibold tracking-tight">
+          시트기반 파이썬
+        </span>
+        <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
+          Sheet Python
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                aria-label="브라우저 파이썬의 한계 안내"
+                className="rounded-full border px-1 leading-3 hover:bg-muted"
+              >
+                ⓘ
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="max-w-72 whitespace-pre-line text-left">
+              {[
+                "브라우저(WASM)에서 실행되는 파이썬의 한계:",
+                "· 첫 접속 시 런타임 로드(~10초)와 패키지 첫 import에 지연이 있습니다",
+                "· 패키지는 Pyodide 제공분과 순수 파이썬(micropip)만 사용 가능합니다",
+                "· 데이터 크기는 브라우저 탭 메모리에 제한됩니다",
+                "· 임의 네트워크·파일 시스템 접근은 제한됩니다",
+              ].join("\n")}
+            </TooltipContent>
+          </Tooltip>
+        </span>
+      </div>
       <Separator orientation="vertical" className="h-5" />
       {draft !== null ? (
         <Input

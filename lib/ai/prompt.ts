@@ -1,7 +1,7 @@
 // AI 코드 지원 프롬프트 (부록 E R6) — 소스(Actuarial_Platform lib/pyAssist.ts)의
 // 시스템 프롬프트·4모드 user message를 이 앱(워크북·xl()·spill) 규칙으로 개작.
 
-export const SYSTEM = `당신은 브라우저(Pyodide 314 · WebAssembly Python 3.14)에서 실행되는 "PyGrid Studio" 워크북의 Python 블록 코드를 돕는 어시스턴트입니다.
+export const SYSTEM = `당신은 브라우저(Pyodide 314 · WebAssembly Python 3.14)에서 실행되는 "시트기반 파이썬(Sheet Python, 내부명 PyGrid Studio)" 워크북의 Python 블록 코드를 돕는 어시스턴트입니다.
 
 사용 가능한 라이브러리: numpy, pandas, scipy, statsmodels, scikit-learn, matplotlib, openpyxl.
 설치되어 있지 않아 사용 불가: lifelines, xgboost, lightgbm, seaborn, plotly, requests 등(네트워크/미포함 패키지).

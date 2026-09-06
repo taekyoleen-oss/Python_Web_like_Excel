@@ -1,4 +1,6 @@
-# PyGrid Studio
+# 시트기반 파이썬 (Sheet Python)
+
+> 내부 프로젝트명은 PyGrid Studio이며 파일 확장자(.pygrid.json)·코드 식별자는 호환성을 위해 유지합니다.
 
 브라우저에서 서버 없이 실행되는 **Python in Excel** 스타일 워크북. 표를 붙여넣고, PY 블록에서 `xl("A1:C10", headers=True)` 참조로 시트 데이터를 받아 Pyodide(WASM)로 실행하고, 결과를 spill·객체 카드·이미지로 확인합니다.
 
@@ -16,6 +18,13 @@ npm run build && npm start   # 프로덕션
 ```
 
 첫 방문 시 생명표 샘플 워크북이 열리고, Pyodide(numpy·pandas)는 jsDelivr CDN에서 백그라운드 로드됩니다(약 10초, 재방문은 브라우저 캐시). matplotlib 등은 첫 import 때 지연 로드됩니다.
+
+## 브라우저 파이썬의 한계
+
+- **실행 지연**: 첫 접속 시 런타임 로드(~10초)와 각 패키지의 첫 import에 시간이 걸립니다(재방문은 캐시로 단축).
+- **제한적인 패키지**: Pyodide가 제공하는 패키지와 순수 파이썬 패키지(micropip)만 사용할 수 있습니다 — xgboost·plotly·requests 등은 불가.
+- **메모리**: 데이터 크기는 브라우저 탭 메모리 한도에 종속됩니다.
+- **격리 환경**: 임의 네트워크 접근·로컬 파일 시스템 접근이 제한됩니다(데이터는 앱의 불러오기 기능 사용).
 
 ## AI 설정 (선택)
 
