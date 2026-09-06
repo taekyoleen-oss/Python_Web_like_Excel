@@ -20,8 +20,14 @@ import { parseA1 } from "@/lib/grid/a1";
 import { useWorkbookStore } from "@/lib/grid/model";
 import { cn } from "@/lib/utils";
 
-/** blockId → 커서 위치 삽입 함수 (참조 삽입 바·스니펫 메뉴가 사용) */
-export const editorRegistry = new Map<string, (text: string) => void>();
+/** 마운트된 블록 편집기 핸들 (참조 삽입 바·스니펫 메뉴·목차 서브 항목이 사용) */
+export interface EditorHandle {
+  /** 커서 위치에 텍스트 삽입 */
+  insert: (text: string) => void;
+  /** 해당 줄(0-기반)로 커서 이동 + 스크롤 (부록 F.2 목차 서브 항목) */
+  scrollToLine: (line: number) => void;
+}
+export const editorRegistry = new Map<string, EditorHandle>();
 
 const XL_RE = /xl\(\s*(["'])([^"']+)\1/g;
 
@@ -130,6 +136,15 @@ export default function CodeEditor({
                 return true;
               },
             },
+            {
+              // 부록 F.4: Shift+Enter도 실행 — 실행기 없는 편집기(초기화 스크립트)는 줄바꿈 유지
+              key: "Shift-Enter",
+              run: () => {
+                if (!cbRef.current.onRun) return false;
+                cbRef.current.onRun();
+                return true;
+              },
+            },
           ]),
         ),
         EditorView.updateListener.of((update) => {
@@ -150,9 +165,21 @@ export default function CodeEditor({
 
     const id = cbRef.current.blockId;
     if (id) {
-      editorRegistry.set(id, (text) => {
-        view.dispatch(view.state.replaceSelection(text));
-        view.focus();
+      editorRegistry.set(id, {
+        insert: (text) => {
+          view.dispatch(view.state.replaceSelection(text));
+          view.focus();
+        },
+        scrollToLine: (line) => {
+          const ln = view.state.doc.line(
+            Math.max(1, Math.min(line + 1, view.state.doc.lines)),
+          );
+          view.dispatch({
+            selection: { anchor: ln.from },
+            effects: EditorView.scrollIntoView(ln.from, { y: "start" }),
+          });
+          view.focus();
+        },
       });
     }
     return () => {

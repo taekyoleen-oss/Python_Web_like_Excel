@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { AiGenerateBar } from "@/components/python/AiAssist";
 import InitScriptDialog from "@/components/python/InitScriptDialog";
 import PyBlockCard from "@/components/python/PyBlockCard";
+import SnippetInsertDialog from "@/components/python/SnippetInsertDialog";
 import SnippetMenu from "@/components/python/SnippetMenu";
 import { editorRegistry } from "@/components/python/CodeEditor";
 import { blocksInOrder } from "@/lib/grid/run-block";
@@ -27,7 +28,7 @@ function RefInsertBar() {
   return (
     <div className="border-t bg-accent/60 px-2 py-1.5">
       <button
-        onClick={() => editorRegistry.get(lastEditorBlockId)?.(ref)}
+        onClick={() => editorRegistry.get(lastEditorBlockId)?.insert(ref)}
         className="w-full truncate rounded border border-primary/40 bg-background px-2 py-1 text-left font-mono text-xs text-primary hover:bg-accent"
         title="블록 코드의 커서 위치에 참조 삽입"
       >
@@ -63,7 +64,11 @@ export default function PythonPanel() {
           <InitScriptDialog />
         </div>
       </div>
-      <AiGenerateBar />
+      {/* 상단 행 — 코드 삽입(부록 F.1) + ✦ AI 생성 바 */}
+      <div className="flex items-center border-b pl-2">
+        <SnippetInsertDialog />
+        <AiGenerateBar />
+      </div>
 
       <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-2">
         {blocks.length === 0 ? (

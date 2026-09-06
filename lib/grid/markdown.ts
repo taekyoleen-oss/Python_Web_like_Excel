@@ -7,6 +7,7 @@
 import { createElement, type ReactNode } from "react";
 import type { BlockKind, PyBlock, RunStatus } from "@/types/workbook";
 import { formatA1 } from "./a1";
+import { codeTitle } from "./code-sections";
 
 export type Inline =
   | { t: "text"; v: string }
@@ -354,7 +355,8 @@ export function buildToc(ordered: PyBlock[]): TocEntry[] {
       key: b.id,
       blockId: b.id,
       level: Math.min(depth + 1, 6),
-      label: b.title?.trim() || anchorLabel(b),
+      // 제목 폴백(부록 F.3): 비어 있으면 코드 첫 주석에서 유도, 그래도 없으면 앵커 주소
+      label: b.title?.trim() || codeTitle(b.code) || anchorLabel(b),
       kind: "code",
       status: b.last?.status,
     });

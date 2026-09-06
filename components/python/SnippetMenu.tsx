@@ -27,7 +27,7 @@ export default function SnippetMenu() {
     }
     const block = st.workbook.pyBlocks.find((b) => b.id === blockId);
     const ref = xlRefForSelection(block?.sheetId) ?? 'xl("A1")';
-    target(code.replace(/\{\{range\}\}/g, ref));
+    target.insert(code.replace(/\{\{range\}\}/g, ref));
   };
 
   return (

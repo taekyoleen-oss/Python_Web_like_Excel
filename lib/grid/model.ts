@@ -105,8 +105,8 @@ function clearSpillCells(wb: Workbook, blockId: string, outputId?: string): void
   }
 }
 
-/** 새 출력 자리 찾기용: 값·spill·블록 앵커·다른 출력 앵커가 있으면 쓸 수 없다 */
-function cellTaken(sheet: Sheet, blocks: PyBlock[], r: number, c: number): boolean {
+/** 새 출력·블록 자리 찾기용: 값·spill·블록 앵커·다른 출력 앵커가 있으면 쓸 수 없다 */
+export function cellTaken(sheet: Sheet, blocks: PyBlock[], r: number, c: number): boolean {
   const cell = sheet.cells[cellKey(r, c)];
   if (cell && (cell.src || (cell.v !== null && cell.v !== ""))) return true;
   return blocks.some(

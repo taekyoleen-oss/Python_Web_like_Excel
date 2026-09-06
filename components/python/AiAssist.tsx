@@ -85,8 +85,9 @@ export function AiGenerateBar() {
     }
   };
 
+  // 테두리·자리는 PythonPanel의 상단 행(코드 삽입 버튼과 한 줄)이 관리한다 (부록 F.1)
   return (
-    <div className="border-b px-2 py-1.5">
+    <div className="min-w-0 flex-1 px-2 py-1.5">
       <div className="flex items-center gap-1">
         <Input
           value={request}

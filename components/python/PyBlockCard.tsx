@@ -50,6 +50,7 @@ import { AiAssist } from "@/components/python/AiAssist";
 import CodeEditor from "@/components/python/CodeEditor";
 import { formatA1 } from "@/lib/grid/a1";
 import { notifyWorkbookEdit } from "@/lib/grid/calc-host";
+import { codeTitle } from "@/lib/grid/code-sections";
 import { renderMarkdown } from "@/lib/grid/markdown";
 import { useWorkbookStore } from "@/lib/grid/model";
 import { outputsOf } from "@/lib/grid/outputs";
@@ -532,6 +533,12 @@ export default function PyBlockCard({
     [isMarkdown, block.markdown],
   );
 
+  // 제목 폴백 (부록 F.3) — 표시 전용, 스토어에 쓰지 않는다
+  const fallbackTitle = useMemo(
+    () => (isMarkdown ? "" : codeTitle(block.code)),
+    [isMarkdown, block.code],
+  );
+
   return (
     <div
       ref={cardRef}
@@ -543,7 +550,8 @@ export default function PyBlockCard({
       data-block-id={block.id}
       data-block-kind={isMarkdown ? "markdown" : "code"}
     >
-      {/* 헤더 — 접기·앵커·상태·제목만 */}
+      {/* 헤더 (부록 F.3) — [접기][제목 맨 앞][상태·dirty·마크다운][앵커 주소 맨 뒤].
+          접기 시에도 이 줄은 통째로 남는다 — 숨는 것은 아래 본문뿐 */}
       <div className="flex items-center gap-1.5 border-b bg-muted/40 px-2 py-1">
         <button
           onClick={() => store().setBlockCollapsed(block.id, !collapsed)}
@@ -554,13 +562,20 @@ export default function PyBlockCard({
         >
           {collapsed ? <CaretRight className="size-3.5" /> : <CaretDown className="size-3.5" />}
         </button>
-        <button
-          onClick={() => goToAnchor(block)}
-          className="shrink-0 font-mono text-xs text-foreground/80 hover:text-primary"
-          title="앵커 셀로 이동"
-        >
-          {anchorLabel}
-        </button>
+        {isMarkdown ? (
+          <span className="min-w-0 flex-1 truncate text-xs font-medium">
+            {block.title || <span className="text-muted-foreground">제목 없음</span>}
+          </span>
+        ) : (
+          <Input
+            value={block.title ?? ""}
+            onChange={(e) => store().setBlockTitle(block.id, e.target.value)}
+            // 제목이 비어 있으면 코드 첫 주석에서 유도한 표시 전용 제목 (저장 안 함)
+            placeholder={fallbackTitle || "제목 없음"}
+            aria-label="블록 제목"
+            className="h-6 min-w-0 flex-1 px-1.5"
+          />
+        )}
         {isMarkdown ? (
           <Badge variant="secondary">마크다운</Badge>
         ) : (
@@ -575,19 +590,13 @@ export default function PyBlockCard({
             )}
           </>
         )}
-        {isMarkdown ? (
-          <span className="min-w-0 flex-1 truncate text-xs font-medium">
-            {block.title || <span className="text-muted-foreground">제목 없음</span>}
-          </span>
-        ) : (
-          <Input
-            value={block.title ?? ""}
-            onChange={(e) => store().setBlockTitle(block.id, e.target.value)}
-            placeholder="제목 없음"
-            aria-label="블록 제목"
-            className="h-6 min-w-0 flex-1 px-1.5"
-          />
-        )}
+        <button
+          onClick={() => goToAnchor(block)}
+          className="shrink-0 font-mono text-xs text-foreground/80 hover:text-primary"
+          title="앵커 셀로 이동"
+        >
+          {anchorLabel}
+        </button>
       </div>
 
       {/* 떠 있는 셀 툴바 — hover·포커스에서만 보이지만 DOM에는 항상 있어 Tab으로 닿는다 */}

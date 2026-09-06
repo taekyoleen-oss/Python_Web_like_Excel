@@ -3,7 +3,7 @@
 // 목차 전용 패널 (부록 D.2) — 마크다운 헤딩 계층 + 그 아래 코드 블록.
 // 현재 블록은 primary 색 + 좌측 세로 바로 강조하고, hover 시 ▶(실행)·⋮(이동·이름·삭제)를 노출한다.
 
-import { useMemo } from "react";
+import { Fragment, useMemo } from "react";
 import { DotsThreeVertical, Play, X } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import {
@@ -12,6 +12,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { editorRegistry } from "@/components/python/CodeEditor";
+import { codeSections, type CodeSection } from "@/lib/grid/code-sections";
 import { buildToc, type TocEntry } from "@/lib/grid/markdown";
 import { useWorkbookStore } from "@/lib/grid/model";
 import { blocksInOrder, runBlocks } from "@/lib/grid/run-block";
@@ -48,6 +50,16 @@ function goToBlock(blockId: string): void {
   requestAnimationFrame(() => store().setFocusBlock(blockId));
 }
 
+/** 서브 항목 클릭 (부록 F.2) — 카드 포커스 + 편집기에서 해당 줄로 스크롤 */
+function goToSection(blockId: string, line: number): void {
+  goToBlock(blockId);
+  // goToBlock의 rAF(setFocusBlock) → 편집기 마운트·포커스 다음 프레임에 줄 스크롤.
+  // 좁은 화면(편집기가 전체 화면 다이얼로그)에서는 registry가 비어 있어 포커스만 된다.
+  requestAnimationFrame(() =>
+    requestAnimationFrame(() => editorRegistry.get(blockId)?.scrollToLine(line)),
+  );
+}
+
 /** 이름 바꾸기 — 카드로 이동한 뒤 제목 입력(마크다운은 본문)에 포커스 */
 function renameBlock(blockId: string): void {
   goToBlock(blockId);
@@ -75,6 +87,12 @@ export function TocList() {
   const workbook = useWorkbookStore((s) => s.workbook);
   const blocks = useMemo(() => blocksInOrder(workbook), [workbook]);
   const toc = useMemo(() => buildToc(blocks), [blocks]);
+  // 코드 블록의 섹션 주석 → 서브 항목 (부록 F.2)
+  const sections = useMemo(() => {
+    const m = new Map<string, CodeSection[]>();
+    for (const b of blocks) if (b.kind !== "markdown") m.set(b.id, codeSections(b.code));
+    return m;
+  }, [blocks]);
   // 현재 항목: 최근 선택한 블록 → 없으면 마지막으로 편집한 블록 (한 블록의 첫 항목만 강조)
   const activeId = useWorkbookStore((s) => s.selectedBlockId ?? s.lastEditorBlockId);
   const activeKey = toc.find((e) => e.blockId === activeId)?.key;
@@ -92,8 +110,8 @@ export function TocList() {
       {toc.map((entry, i) => {
         const active = entry.key === activeKey;
         return (
+          <Fragment key={entry.key}>
           <li
-            key={entry.key}
             className={cn(
               "group flex items-center border-l-2 pr-1",
               active ? "border-primary bg-accent/40" : "border-transparent",
@@ -147,6 +165,26 @@ export function TocList() {
               </DropdownMenu>
             </div>
           </li>
+          {/* 코드 섹션 주석 → 한 단계 안쪽 서브 항목 (부록 F.2) */}
+          {entry.kind === "code" &&
+            (sections.get(entry.blockId) ?? []).map((s) => (
+              <li
+                key={`${entry.key}:s${s.line}`}
+                className="flex items-center border-l-2 border-transparent pr-1"
+                data-testid="toc-section"
+              >
+                <button
+                  onClick={() => goToSection(entry.blockId, s.line)}
+                  aria-label={s.title}
+                  style={{ paddingLeft: `${entry.level * 12 + 6}px` }}
+                  className="flex min-w-0 flex-1 items-center gap-1.5 rounded py-0.5 text-left text-xs text-muted-foreground hover:bg-accent"
+                >
+                  <span className="shrink-0">·</span>
+                  <span className="truncate">{s.title}</span>
+                </button>
+              </li>
+            ))}
+          </Fragment>
         );
       })}
     </ul>
