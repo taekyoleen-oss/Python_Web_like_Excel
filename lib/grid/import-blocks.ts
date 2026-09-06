@@ -13,6 +13,12 @@ import { saveSettings } from "@/lib/storage/db";
 export interface SendSection {
   title?: string;
   code: string;
+  /** 설정 시 code 대신 마크다운 블록을 만든다 (H.3 모델적합 가이드) */
+  markdown?: string;
+  /** 출력 모드 (기본 values) — fig가 마지막 표현식인 블록은 object */
+  outputMode?: "values" | "object";
+  /** 이 블록 아래로 비워둘 행 수(값 모드 spill 여유, 기본 2) */
+  reserve?: number;
 }
 
 /**
@@ -50,10 +56,16 @@ export function createReferenceBlocks(title: string | null, sections: SendSectio
     );
   };
 
-  // 마크다운 r0, 코드 블록은 2행 간격 — 앵커가 사용 셀과 겹치면 한 열씩 오른쪽으로
-  const codeRow = (i: number) => (title === null ? i * 2 : 2 + i * 2);
-  const rows = sections.map((_, i) => codeRow(i));
-  if (title !== null) rows.unshift(0);
+  // 마크다운 r0, 섹션은 기본 2행 간격(reserve로 spill 여유 확장) — 겹치면 한 열씩 오른쪽으로
+  const sectionRows: number[] = [];
+  {
+    let r = title === null ? 0 : 2;
+    for (const s of sections) {
+      sectionRows.push(r);
+      r += Math.max(2, s.reserve ?? 2);
+    }
+  }
+  const rows = title !== null ? [0, ...sectionRows] : [...sectionRows];
   let col = maxCol < 0 ? 0 : maxCol + 2;
   // ponytail: 열 단위 우측 스캔 — 실사용 밀도에서 수 회면 끝난다
   while (rows.some((r) => taken(r, col))) col++;
@@ -74,12 +86,26 @@ export function createReferenceBlocks(title: string | null, sections: SendSectio
     });
   }
   sections.forEach((s, i) => {
+    if (s.markdown !== undefined) {
+      blocks.push({
+        id: newId(),
+        sheetId: sheet.id,
+        anchor: { r: sectionRows[i], c: col },
+        code: "",
+        outputMode: "values",
+        includeIndex: "auto",
+        kind: "markdown",
+        markdown: s.markdown,
+        title: markdownTitle(s.markdown) || s.title || "마크다운",
+      });
+      return;
+    }
     const block: PyBlock = {
       id: newId(),
       sheetId: sheet.id,
-      anchor: { r: codeRow(i), c: col },
+      anchor: { r: sectionRows[i], c: col },
       code: s.code,
-      outputMode: "values",
+      outputMode: s.outputMode ?? "values",
       includeIndex: "auto",
       ...(s.title ? { title: s.title } : {}),
     };

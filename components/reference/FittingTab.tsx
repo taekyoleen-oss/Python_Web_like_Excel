@@ -52,6 +52,7 @@ import { CodeDialog, type CodeTab } from "@/components/reference/CodeDialog";
 import { StatInfoDialog } from "@/components/reference/StatInfoDialog";
 import { STAT_INFOS } from "@/lib/reference/statInfos";
 import { selectionToCells } from "@/lib/grid/import-blocks";
+import { openFitGuideDialog } from "@/components/python/FitGuideDialog";
 
 /* ─────────────────────── 분포 카탈로그(표시용) ─────────────────────── */
 
@@ -856,10 +857,21 @@ export default function FittingTab() {
         <h2 className="text-[17px] font-semibold text-foreground">
           모델 적합 — 데이터로 분포 찾기
         </h2>
-        <p className="text-[12.5px] text-muted-foreground">
-          데이터를 붙여넣으면 empirical 분포를 그리고, scipy(브라우저 파이썬)로
-          후보 분포를 적합해 AIC·BIC 등으로 비교합니다
-        </p>
+        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+          <p className="text-[12.5px] text-muted-foreground">
+            데이터를 붙여넣으면 empirical 분포를 그리고, scipy(브라우저 파이썬)로
+            후보 분포를 적합해 AIC·BIC 등으로 비교합니다
+          </p>
+          <button
+            type="button"
+            onClick={() => openFitGuideDialog()}
+            data-testid="fit-guide-open"
+            title="워크북에 단계별 [설명+코드] 블록을 만들어 노트북 스타일로 진행합니다 (부록 H.3)"
+            className="rounded border border-[var(--primary)] px-3 py-1.5 text-[12.5px] font-medium text-[var(--primary)] hover:bg-[color-mix(in_srgb,var(--chip-blue-bg)_55%,white)]"
+          >
+            워크북에서 단계별로 진행
+          </button>
+        </div>
       </div>
 
       {/* 데이터 입력 헤더 */}

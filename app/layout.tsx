@@ -41,6 +41,8 @@ export default function RootLayout({
       <body className="antialiased">
         {children}
         <Toaster />
+        {/* glide-data-grid 오버레이 편집기 포털 — 없으면 셀 타이핑 편집이 조용히 실패한다 */}
+        <div id="portal" />
       </body>
     </html>
   );

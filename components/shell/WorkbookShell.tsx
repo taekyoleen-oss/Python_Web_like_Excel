@@ -16,6 +16,7 @@ import SheetGrid from "@/components/grid/SheetGrid";
 import SheetTabs from "@/components/grid/SheetTabs";
 import AiChatPanel from "@/components/ai-chat/AiChatPanel";
 import BottomPanel from "@/components/panels/BottomPanel";
+import FitGuideDialog from "@/components/python/FitGuideDialog";
 import PythonPanel from "@/components/python/PythonPanel";
 import TocPanel from "@/components/python/TocPanel";
 import {
@@ -407,6 +408,7 @@ export default function WorkbookShell() {
         </div>
         <StatusBar saveStatus={saveStatus} />
         <PasteImportDialog />
+        <FitGuideDialog />
       </div>
     </TooltipProvider>
   );

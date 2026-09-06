@@ -8,6 +8,7 @@
 
 import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
 import { toast } from "sonner";
+import { openFitGuideDialog } from "@/components/python/FitGuideDialog";
 import { CopyButton, highlightPython } from "@/components/reference/code-popup";
 import { PLOT_META, PlotSampleSvg } from "@/components/reference/PlotSampleSvg";
 import { Button } from "@/components/ui/button";
@@ -122,9 +123,11 @@ function lastRunVariable(dfVars: string[]): string | undefined {
 function GroupList({
   active,
   onSelect,
+  onFitGuide,
 }: {
   active: string;
   onSelect: (key: string) => void;
+  onFitGuide: () => void;
 }) {
   const section = (kind: Group["kind"], title: string) => (
     <>
@@ -150,6 +153,13 @@ function GroupList({
     <div className="w-44 shrink-0 overflow-y-auto rounded border py-1">
       {section("wrangle", "핸들링")}
       {section("plot", "그래프")}
+      <p className="px-2 pb-0.5 pt-2 text-[11px] font-semibold text-muted-foreground">가이드</p>
+      <button
+        onClick={onFitGuide}
+        className="block w-full truncate px-2 py-1 text-left text-xs text-foreground/80 hover:bg-accent"
+      >
+        모델적합 가이드…
+      </button>
     </div>
   );
 }
@@ -304,7 +314,15 @@ export default function SnippetInsertDialog() {
         </DialogHeader>
 
         <div className="flex min-h-0 flex-1 gap-2">
-          <GroupList active={group.key} onSelect={selectGroup} />
+          <GroupList
+            active={group.key}
+            onSelect={selectGroup}
+            onFitGuide={() => {
+              // 팝업을 닫고 모델적합 가이드 마법사로 전환 (부록 H.3 진입점)
+              setOpen(false);
+              openFitGuideDialog();
+            }}
+          />
 
           {/* 스니펫 목록 — 그래프는 SVG 미리보기 썸네일 */}
           <div className="w-64 shrink-0 overflow-y-auto rounded border py-1">

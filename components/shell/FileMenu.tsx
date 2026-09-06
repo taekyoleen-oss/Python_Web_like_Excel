@@ -5,6 +5,8 @@
 import { useRef, useState } from "react";
 import { CaretDown } from "@phosphor-icons/react";
 import { toast } from "sonner";
+import chainLadderSample from "@/data/sample-workbooks/chain-ladder.pygrid.json";
+import claimSeveritySample from "@/data/sample-workbooks/claim-severity.pygrid.json";
 import lifeTableSample from "@/data/sample-workbooks/life-table.pygrid.json";
 import lossRatioSample from "@/data/sample-workbooks/loss-ratio.pygrid.json";
 import ApiKeyDialog, { openApiKeyDialog } from "@/components/shell/ApiKeyDialog";
@@ -48,6 +50,8 @@ export function loadWorkbookData(wb: Workbook): void {
 
 export const SAMPLE_LIFE_TABLE = lifeTableSample as unknown as Workbook;
 export const SAMPLE_LOSS_RATIO = lossRatioSample as unknown as Workbook;
+export const SAMPLE_CLAIM_SEVERITY = claimSeveritySample as unknown as Workbook;
+export const SAMPLE_CHAIN_LADDER = chainLadderSample as unknown as Workbook;
 
 /** 확장자별 열기 — FileMenu 선택·드래그 앤 드롭 공용 */
 export async function openWorkbookFile(file: File): Promise<void> {
@@ -276,6 +280,12 @@ export default function FileMenu() {
           </DropdownMenuItem>
           <DropdownMenuItem onClick={() => loadWorkbookData(SAMPLE_LOSS_RATIO)}>
             샘플: 손해율 집계
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => loadWorkbookData(SAMPLE_CLAIM_SEVERITY)}>
+            샘플: 청구 심도 적합
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => loadWorkbookData(SAMPLE_CHAIN_LADDER)}>
+            샘플: 체인래더 준비금
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuSub>

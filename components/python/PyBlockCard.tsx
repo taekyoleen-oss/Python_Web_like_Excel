@@ -628,6 +628,7 @@ export default function PyBlockCard({
           <Button
             variant="ghost"
             size="icon-xs"
+            onMouseDown={(e) => e.preventDefault()} // 편집 중 blur(→미리보기)가 먼저 발생해 클릭 토글이 원상복구되는 것 방지
             onClick={() => setEditingMd((v) => !v)}
             aria-label="편집/미리보기 전환"
             title="편집/미리보기 전환"
