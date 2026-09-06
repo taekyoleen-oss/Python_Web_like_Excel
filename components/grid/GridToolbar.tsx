@@ -6,6 +6,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import {
   Article,
+  ChatCircleText,
   ClipboardText,
   ListBullets,
   Play,
@@ -255,6 +256,7 @@ export default function GridToolbar() {
   const [pasteDialogOpen, setPasteDialogOpen] = useState(false);
   const calcMode = useWorkbookStore((s) => s.workbook.calcMode);
   const tocOpen = useWorkbookStore((s) => s.tocOpen);
+  const aiChatOpen = useWorkbookStore((s) => s.aiChatOpen);
 
   const store = () => useWorkbookStore.getState();
   const rowIndex = selection?.r0 ?? 0;
@@ -327,6 +329,17 @@ export default function GridToolbar() {
         }}
       >
         <ListBullets />
+      </ToolButton>
+      {/* 부록 G.2: AI 채팅 패널 토글 (TocPanel과 같은 패턴) */}
+      <ToolButton
+        label={aiChatOpen ? "AI 채팅 패널 닫기" : "AI 채팅 패널 열기"}
+        active={aiChatOpen}
+        onClick={() => {
+          store().setAiChatOpen(!aiChatOpen);
+          void saveSettings({ aiChatOpen: !aiChatOpen });
+        }}
+      >
+        <ChatCircleText />
       </ToolButton>
       {/* 실행 버튼은 --primary 채움 (§4.6 Button) */}
       <Tooltip>

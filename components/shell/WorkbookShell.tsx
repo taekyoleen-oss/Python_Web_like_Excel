@@ -14,6 +14,7 @@ import GridToolbar from "@/components/grid/GridToolbar";
 import PasteImportDialog, { startPasteFlow } from "@/components/grid/PasteImportDialog";
 import SheetGrid from "@/components/grid/SheetGrid";
 import SheetTabs from "@/components/grid/SheetTabs";
+import AiChatPanel from "@/components/ai-chat/AiChatPanel";
 import BottomPanel from "@/components/panels/BottomPanel";
 import PythonPanel from "@/components/python/PythonPanel";
 import TocPanel from "@/components/python/TocPanel";
@@ -67,7 +68,7 @@ function useTier(): Tier {
   return tier;
 }
 
-type MobileView = "grid" | "python" | "toc" | "bottom";
+type MobileView = "grid" | "python" | "toc" | "ai" | "bottom";
 
 export default function WorkbookShell() {
   const saveStatus = useAutosave();
@@ -90,14 +91,20 @@ export default function WorkbookShell() {
   useEffect(() => {
     if (view === "reference") setRefMounted(true);
   }, [view]);
+  const aiChatOpen = useWorkbookStore((s) => s.aiChatOpen);
   const closeToc = () => {
     useWorkbookStore.getState().setTocOpen(false);
     void saveSettings({ tocOpen: false });
   };
-  // 3단 분할 크기 — 목차 패널이 열리면 그리드·Python이 비율대로 줄어든다 (합계 100%)
+  const closeAiChat = () => {
+    useWorkbookStore.getState().setAiChatOpen(false);
+    void saveSettings({ aiChatOpen: false });
+  };
+  // 분할 크기 — 목차·AI 채팅 패널이 열리면 그리드·Python이 비율대로 줄어든다 (합계 100%)
   const TOC_SIZE = 16;
+  const AI_SIZE = 20;
   const pyHidden = tier === "lg" && pyCollapsed;
-  const rest = tocOpen ? 100 - TOC_SIZE : 100;
+  const rest = 100 - (tocOpen ? TOC_SIZE : 0) - (aiChatOpen ? AI_SIZE : 0);
   const gridSize = pyHidden ? rest : Math.round((splitRatio / 100) * rest);
   const pySize = rest - gridSize;
 
@@ -208,6 +215,7 @@ export default function WorkbookShell() {
         if (settings?.splitRatio) setSplitRatio(settings.splitRatio);
         if (settings?.bottomPanelHeight) setBottomHeight(settings.bottomPanelHeight);
         if (settings?.tocOpen) useWorkbookStore.getState().setTocOpen(true);
+        if (settings?.aiChatOpen) useWorkbookStore.getState().setAiChatOpen(true);
         if (settings?.view === "reference") useWorkbookStore.getState().setView("reference");
         const wb = settings?.lastWorkbookId
           ? await getWorkbook(settings.lastWorkbookId)
@@ -274,6 +282,7 @@ export default function WorkbookShell() {
                   ["grid", "그리드"],
                   ["python", "Python"],
                   ["toc", "목차"],
+                  ["ai", "AI 채팅"],
                   ["bottom", "결과"],
                 ] as const
               ).map(([id, label]) => (
@@ -304,6 +313,7 @@ export default function WorkbookShell() {
               )}
               {mobileView === "python" && <PythonPanel />}
               {mobileView === "toc" && <TocPanel />}
+              {mobileView === "ai" && <AiChatPanel />}
               {mobileView === "bottom" && (
                 <div className="h-full">
                   <BottomPanel client={runtime} />
@@ -331,7 +341,7 @@ export default function WorkbookShell() {
                   </button>
                 )}
                 <ResizablePanelGroup
-                  key={`${tier === "lg" && pyCollapsed ? "collapsed" : "split"}-${tocOpen ? "toc" : "no-toc"}`}
+                  key={`${tier === "lg" && pyCollapsed ? "collapsed" : "split"}-${tocOpen ? "toc" : "no-toc"}-${aiChatOpen ? "ai" : "no-ai"}`}
                   orientation="horizontal"
                   className="min-h-0"
                   onLayoutChanged={onLayoutChanged}
@@ -363,6 +373,15 @@ export default function WorkbookShell() {
                       <ResizableHandle withHandle />
                       <ResizablePanel id="toc" defaultSize={`${TOC_SIZE}%`} minSize="10%">
                         <TocPanel onClose={closeToc} />
+                      </ResizablePanel>
+                    </>
+                  )}
+                  {/* 부록 G.2: AI 채팅 패널 (최우측, 같은 패턴) */}
+                  {aiChatOpen && (
+                    <>
+                      <ResizableHandle withHandle />
+                      <ResizablePanel id="aichat" defaultSize={`${AI_SIZE}%`} minSize="12%">
+                        <AiChatPanel onClose={closeAiChat} />
                       </ResizablePanel>
                     </>
                   )}

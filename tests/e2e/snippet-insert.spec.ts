@@ -75,6 +75,11 @@ test("코드 삽입 팝업 → 아래 새 블록·현재 블록 추가·undo →
   const preview = dialog.getByTestId("snippet-code-preview");
   await expect(preview).toContainText("# ▸ 히스토그램 + KDE"); // 삽입될 코드 그대로
   await expect(preview).toContainText("plt.subplots");
+  // 부록 G.1: 자리표시자(df) amber 하이라이트 + 치환 드롭다운(기본 '치환 안 함')
+  await expect(preview.locator('[data-ph="df"]').first()).toBeVisible();
+  const phControls = dialog.getByTestId("placeholder-controls");
+  await expect(phControls).toBeVisible();
+  await expect(phControls.getByLabel("자리표시자 df")).toContainText("치환 안 함");
 
   // ── 아래 새 블록으로 — 계산 순서상 기준 바로 다음, 자동 실행 없음
   await dialog.getByRole("button", { name: "아래 새 블록으로" }).click();
@@ -164,4 +169,61 @@ test("코드 삽입 팝업 → 아래 새 블록·현재 블록 추가·undo →
   await expect(refCard.getByLabel("Python 코드")).toBeHidden(); // 코드 숨김
   // 목차 라벨도 폴백 제목을 쓴다
   await expect(toc.getByRole("button", { name: "준비", exact: true }).first()).toBeVisible();
+});
+
+test("자리표시자 치환 (부록 G.1): 유일 DataFrame 자동 선택 → 삽입 코드에 반영", async ({
+  page,
+}) => {
+  test.setTimeout(300_000);
+  await page.goto("/");
+  await waitForApp(page);
+
+  // ── policy DataFrame을 실제 런타임에 만든다 (수동 모드, ▶ 직접 실행)
+  await page.evaluate(() => {
+    (window as any).__pygridStore.getState().setSelection({ r0: 0, c0: 0, r1: 0, c1: 0 });
+  });
+  await page.keyboard.press("Control+Shift+P");
+  const editor = page.getByLabel("Python 코드");
+  await expect(editor).toBeFocused();
+  await editor.fill(
+    'import pandas as pd\npolicy = pd.DataFrame({"premium": [1, 2, 3]})\npolicy',
+  );
+  await page.getByRole("button", { name: "실행", exact: true }).click();
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() => {
+          const st = (window as any).__pygridStore.getState();
+          return Object.values(st.workbook.sheets[0].cells).filter((c: any) => c.src).length;
+        }),
+      { timeout: 150_000, intervals: [1000] },
+    )
+    .toBeGreaterThan(0);
+
+  // ── 팝업: df 자리표시자가 유일 DataFrame(policy)으로 자동 선택된다
+  await page.getByRole("button", { name: "코드 삽입" }).click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByRole("button", { name: "탐색 (EDA)", exact: true }).click();
+  await dialog.getByRole("button", { name: /히스토그램 \+ KDE/ }).click();
+  const dfSelect = dialog.getByLabel("자리표시자 df");
+  await expect(dfSelect).toContainText("policy", { timeout: 15_000 }); // 자동 선택
+  const preview = dialog.getByTestId("snippet-code-preview");
+  await expect(preview).toContainText("policy[col]"); // 미리보기에 치환 반영
+  await expect(preview.locator('[data-ph="df"]')).toHaveCount(0); // 치환 후 amber 소멸
+
+  // ── 삽입: 새 블록 코드에 치환이 반영된다 (이름만 — 로직 불변)
+  await dialog.getByRole("button", { name: "아래 새 블록으로" }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(() => (window as any).__pygridStore.getState().workbook.pyBlocks.length),
+    )
+    .toBe(2);
+  const created = await page.evaluate(() => {
+    const st = (window as any).__pygridStore.getState();
+    const first = st.workbook.pyBlocks[0];
+    return st.workbook.pyBlocks.find((b: any) => b.id !== first.id);
+  });
+  expect(created.code).toContain("policy[col]");
+  expect(created.code).toContain("# ▸ 히스토그램 + KDE");
+  expect(created.last).toBeUndefined(); // 자동 실행 없음
 });

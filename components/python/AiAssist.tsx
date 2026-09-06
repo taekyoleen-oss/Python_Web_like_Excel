@@ -6,6 +6,7 @@
 import { useState } from "react";
 import { Sparkle } from "@phosphor-icons/react";
 import { toast } from "sonner";
+import { askAiChat } from "@/components/ai-chat/AiChatPanel";
 import { openApiKeyDialog, getApiKey } from "@/components/shell/ApiKeyDialog";
 import { Button } from "@/components/ui/button";
 import {
@@ -237,6 +238,18 @@ export function AiAssist({ block }: { block: PyBlock }) {
               title={hasError ? undefined : "오류 상태의 블록에서만 사용할 수 있습니다"}
             >
               에러분석 — 수정안 보기
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() =>
+                askAiChat({
+                  label: hasError ? "블록 코드 + 오류" : "블록 코드",
+                  text: hasError
+                    ? `${block.code}\n\n[Traceback]\n${block.last?.traceback ?? block.last?.summaryKo ?? ""}`
+                    : block.code,
+                })
+              }
+            >
+              채팅으로 질문 — 코드{hasError ? "·오류" : ""} 첨부
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

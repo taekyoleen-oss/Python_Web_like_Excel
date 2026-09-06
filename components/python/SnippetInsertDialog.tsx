@@ -4,10 +4,11 @@
 // → 삽입될 코드 전체 미리보기 → [현재 블록에 추가 | 아래 새 블록으로 | 위 새 블록으로].
 // 기준 블록 = 마지막으로 편집기 포커스를 받은 코드 블록. Enter = 마지막 사용 위치로 삽입.
 // 새 블록은 자동 실행하지 않는다.
+// 부록 G.1 — 자리표시자(df·"…열"·{{range}}) amber 표시 + 드롭다운 치환(이름만, 로직 불변).
 
-import { useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
 import { toast } from "sonner";
-import { CodeBlock } from "@/components/reference/code-popup";
+import { CopyButton, highlightPython } from "@/components/reference/code-popup";
 import { PLOT_META, PlotSampleSvg } from "@/components/reference/PlotSampleSvg";
 import { Button } from "@/components/ui/button";
 import {
@@ -18,11 +19,27 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { sheetSchemas } from "@/lib/ai/schema";
 import { formatA1 } from "@/lib/grid/a1";
 import { notifyWorkbookEdit } from "@/lib/grid/calc-host";
 import { codeTitle } from "@/lib/grid/code-sections";
 import { appendSnippetToBlock, insertSnippetAsBlock } from "@/lib/grid/insert-snippet";
 import { useWorkbookStore } from "@/lib/grid/model";
+import { outputsOf } from "@/lib/grid/outputs";
+import {
+  detectPlaceholders,
+  PLACEHOLDER_RE,
+  substitutePlaceholders,
+} from "@/lib/grid/snippet-placeholders";
+import { xlRefForSelection } from "@/lib/grid/xl-ref";
+import { getRuntimeClient } from "@/lib/runtime/client";
 import { PLOT_SNIPPET_GROUPS, plotInsertCode } from "@/lib/reference/plotSnippets";
 import { WRANGLE_SNIPPET_GROUPS, snippetInsertCode } from "@/lib/reference/wrangleSnippets";
 import { cn } from "@/lib/utils";
@@ -50,6 +67,57 @@ const GROUPS: Group[] = [
     snippets: g.snippets,
   })),
 ];
+
+/** 자리표시자를 amber로 감싼 코드 미리보기 (경량 하이라이트 + 복사) */
+function PreviewCode({ code }: { code: string }) {
+  const nodes = useMemo(() => {
+    const out: ReactNode[] = [];
+    let last = 0;
+    let key = 0;
+    for (const m of code.matchAll(new RegExp(PLACEHOLDER_RE.source, "g"))) {
+      const idx = m.index ?? 0;
+      out.push(<Fragment key={key++}>{highlightPython(code.slice(last, idx))}</Fragment>);
+      out.push(
+        <span
+          key={key++}
+          data-ph={m[2] ?? m[0]}
+          className="rounded bg-[var(--chip-amber-bg)] px-0.5 text-[var(--chip-amber-fg)]"
+        >
+          {m[0]}
+        </span>,
+      );
+      last = idx + m[0].length;
+    }
+    out.push(<Fragment key={key++}>{highlightPython(code.slice(last))}</Fragment>);
+    return out;
+  }, [code]);
+  return (
+    <div className="relative mt-2">
+      <CopyButton text={code} className="absolute right-2 top-2 z-10" />
+      <pre
+        className="overflow-x-auto rounded border bg-muted px-4 py-3.5 font-mono leading-[1.75] text-foreground"
+        style={{ fontSize: 12 }}
+      >
+        <code>{nodes}</code>
+      </pre>
+    </div>
+  );
+}
+
+/** 마지막으로 실행된 블록의 출력 변수 — dfVars 안에 있으면 기본 선택 후보 (G.1) */
+function lastRunVariable(dfVars: string[]): string | undefined {
+  const blocks = useWorkbookStore.getState().workbook.pyBlocks;
+  let best: { ranAt: string; name: string } | undefined;
+  for (const b of blocks) {
+    for (const o of outputsOf(b)) {
+      const name = o.selection?.variable;
+      const ranAt = o.last?.ranAt;
+      if (!name || !ranAt || !dfVars.includes(name)) continue;
+      if (!best || ranAt > best.ranAt) best = { ranAt, name };
+    }
+  }
+  return best?.name;
+}
 
 function GroupList({
   active,
@@ -107,6 +175,65 @@ export default function SnippetInsertDialog() {
     return group.kind === "plot" ? plotInsertCode(snippet) : snippetInsertCode(snippet);
   }, [group.kind, snippet]);
 
+  // ── 자리표시자 치환 (부록 G.1) — 이름만 바꾼다, 로직 불변 ──
+  const placeholders = useMemo(() => detectPlaceholders(insertText), [insertText]);
+  const [subs, setSubs] = useState<Record<string, string>>({});
+  const [dfVars, setDfVars] = useState<string[]>([]);
+  useEffect(() => setSubs({}), [groupKey, snippetId]); // 스니펫이 바뀌면 선택 초기화
+
+  // 열릴 때 런타임 DataFrame 변수 수집 (준비 전·실패는 빈 목록)
+  useEffect(() => {
+    if (!open) return;
+    void (async () => {
+      try {
+        const client = getRuntimeClient();
+        if (client.getStatus() !== "ready") return;
+        setDfVars(
+          (await client.inspect()).filter((v) => v.type === "DataFrame").map((v) => v.name),
+        );
+      } catch {
+        /* 런타임 미준비 — 드롭다운은 '치환 안 함'만 */
+      }
+    })();
+  }, [open]);
+
+  // 자동 선택: DataFrame이 정확히 1개면 그것, 여럿이면 마지막 실행 블록의 출력 변수
+  useEffect(() => {
+    if (dfVars.length === 0) return;
+    const auto = dfVars.length === 1 ? dfVars[0] : lastRunVariable(dfVars);
+    if (!auto) return;
+    setSubs((cur) => {
+      const next = { ...cur };
+      for (const p of placeholders) {
+        if (p.kind === "variable" && !(p.token in next)) next[p.token] = auto;
+      }
+      return next;
+    });
+  }, [dfVars, placeholders]);
+
+  // 열 후보 = 활성 시트 헤더 행 + 블록 표 미리보기의 열 이름
+  const columnOptions = useMemo(() => {
+    if (!open) return [] as string[];
+    const st = useWorkbookStore.getState();
+    const set = new Set<string>();
+    const schema = sheetSchemas(st.workbook).find(
+      (s, i) => st.workbook.sheets[i]?.id === st.activeSheetId,
+    );
+    for (const h of schema?.headers ?? []) if (h.trim()) set.add(h.trim());
+    for (const b of st.workbook.pyBlocks) {
+      for (const o of outputsOf(b)) {
+        const preview = o.last?.preview as { columns?: string[] } | undefined;
+        for (const c of preview?.columns ?? []) set.add(c);
+      }
+    }
+    return [...set];
+  }, [open]);
+
+  const previewCode = useMemo(
+    () => substitutePlaceholders(insertText, subs),
+    [insertText, subs],
+  );
+
   const selectGroup = (key: string) => {
     setGroupKey(key);
     const g = GROUPS.find((x) => x.key === key);
@@ -115,13 +242,14 @@ export default function SnippetInsertDialog() {
 
   const doInsert = (placement: Placement) => {
     if (!snippet) return;
+    const text = previewCode; // 치환 적용본 (미치환 토큰은 편집기에서 amber 표시)
     let targetId: string;
     if (placement === "append") {
-      if (!refBlock || !appendSnippetToBlock(refBlock.id, insertText)) return;
+      if (!refBlock || !appendSnippetToBlock(refBlock.id, text)) return;
       notifyWorkbookEdit([], [refBlock.id]); // 타이핑 커밋과 같은 통지 경로 (§2.3.3)
       targetId = refBlock.id;
     } else {
-      const res = insertSnippetAsBlock(refBlock?.id ?? null, placement, snippet.label, insertText);
+      const res = insertSnippetAsBlock(refBlock?.id ?? null, placement, snippet.label, text);
       if (!res) {
         toast.error("블록을 만들 수 없습니다 (활성 시트 없음)");
         return;
@@ -216,13 +344,72 @@ export default function SnippetInsertDialog() {
             })}
           </div>
 
-          {/* 삽입될 코드 전체 미리보기 (# ▸ 라벨 + # 설명 접두 포함) */}
+          {/* 삽입될 코드 전체 미리보기 — 자리표시자 amber + 치환 드롭다운 (부록 G.1) */}
           <div
             className="min-w-0 flex-1 overflow-y-auto rounded border px-2 pb-2"
             data-testid="snippet-code-preview"
           >
             {snippet ? (
-              <CodeBlock code={insertText} codeFz={12} />
+              <>
+                {placeholders.length > 0 && (
+                  <div
+                    className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded border bg-[var(--chip-amber-bg)]/40 px-2 py-1.5"
+                    data-testid="placeholder-controls"
+                  >
+                    <span className="text-[11px] text-muted-foreground">
+                      자리표시자 치환(이름만) —
+                    </span>
+                    {placeholders.map((p) => {
+                      const options =
+                        p.kind === "variable"
+                          ? dfVars
+                          : p.kind === "column"
+                            ? columnOptions
+                            : [xlRefForSelection(refBlock?.sheetId) ?? 'xl("A1")'];
+                      const current = subs[p.token] ?? p.token;
+                      return (
+                        <span key={p.token} className="flex items-center gap-1">
+                          <code className="rounded bg-[var(--chip-amber-bg)] px-1 font-mono text-[11px] text-[var(--chip-amber-fg)]">
+                            {p.token}
+                          </code>
+                          <span aria-hidden className="text-[11px] text-muted-foreground">
+                            →
+                          </span>
+                          <Select
+                            value={current}
+                            onValueChange={(v) =>
+                              setSubs((cur) => {
+                                const next = { ...cur };
+                                if (v === p.token) delete next[p.token];
+                                else next[p.token] = v;
+                                return next;
+                              })
+                            }
+                          >
+                            <SelectTrigger
+                              className="h-6 w-36 text-xs"
+                              aria-label={`자리표시자 ${p.token}`}
+                            >
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value={p.token}>치환 안 함</SelectItem>
+                              {options
+                                .filter((o) => o !== p.token)
+                                .map((o) => (
+                                  <SelectItem key={o} value={o} className="font-mono">
+                                    {o}
+                                  </SelectItem>
+                                ))}
+                            </SelectContent>
+                          </Select>
+                        </span>
+                      );
+                    })}
+                  </div>
+                )}
+                <PreviewCode code={previewCode} />
+              </>
             ) : (
               <p className="p-4 text-xs text-muted-foreground">스니펫을 선택하세요</p>
             )}

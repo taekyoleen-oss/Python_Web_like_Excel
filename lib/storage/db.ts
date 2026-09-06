@@ -25,6 +25,12 @@ export interface AppSettings {
   /** Anthropic API 키 (부록 E R6) — 이 브라우저 IndexedDB 전용.
    *  워크북 JSON·내보내기·git 어디에도 실리지 않는다(워크북 객체와 분리 저장) */
   anthropicApiKey?: string;
+  /** AI 채팅 패널 열림 (부록 G.2, 기본 false) */
+  aiChatOpen?: boolean;
+  /** AI 채팅 이력 — 로컬 전용, 워크북 파일 미포함. 최대 200개(저장 시 캡) */
+  aiChatHistory?: { role: "user" | "assistant"; content: string }[];
+  /** AI 채팅 사용자 지침 (부록 G.3) — 미설정이면 기본 시드 사용 */
+  aiChatInstructions?: string;
 }
 
 const DB_NAME = "pygrid";

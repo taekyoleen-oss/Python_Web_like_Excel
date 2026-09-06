@@ -20,8 +20,13 @@ export function parseResponse(text: string): AssistResult {
   return { code: "", explanation: text.trim() };
 }
 
-/** AI 코드 제안 1회 호출. 실패 시 한국어 메시지로 throw */
-export async function assist(apiKey: string, input: AssistInput): Promise<AssistResult> {
+/** 공용 호출 — 시스템+메시지로 1회 요청, 응답 텍스트 반환. 실패 시 한국어 throw */
+async function callText(
+  apiKey: string,
+  system: string,
+  messages: { role: "user" | "assistant"; content: string }[],
+  maxTokens: number,
+): Promise<string> {
   let res: Response;
   try {
     res = await fetch("https://api.anthropic.com/v1/messages", {
@@ -34,9 +39,9 @@ export async function assist(apiKey: string, input: AssistInput): Promise<Assist
       },
       body: JSON.stringify({
         model: MODEL,
-        max_tokens: 1600,
-        system: [{ type: "text", text: SYSTEM, cache_control: { type: "ephemeral" } }],
-        messages: [{ role: "user", content: buildUserMessage(input) }],
+        max_tokens: maxTokens,
+        system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
+        messages,
       }),
     });
   } catch {
@@ -61,5 +66,25 @@ export async function assist(apiKey: string, input: AssistInput): Promise<Assist
     .join("\n")
     .trim();
   if (!text) throw new Error("빈 응답을 받았습니다 — 다시 시도하세요");
+  return text;
+}
+
+/** AI 코드 제안 1회 호출 (4모드 — 부록 E R6, 동작 불변) */
+export async function assist(apiKey: string, input: AssistInput): Promise<AssistResult> {
+  const text = await callText(
+    apiKey,
+    SYSTEM,
+    [{ role: "user", content: buildUserMessage(input) }],
+    1600,
+  );
   return parseResponse(text);
+}
+
+/** AI 채팅 멀티턴 1회 호출 (부록 G.2) — 시스템은 lib/ai/chat.ts buildChatSystem */
+export async function chat(
+  apiKey: string,
+  system: string,
+  messages: { role: "user" | "assistant"; content: string }[],
+): Promise<string> {
+  return callText(apiKey, system, messages, 2400);
 }
