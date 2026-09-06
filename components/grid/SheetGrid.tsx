@@ -7,6 +7,8 @@ import {
   CompactSelection,
   DataEditor,
   GridCellKind,
+  type CellClickedEventArgs,
+  type DataEditorRef,
   type DrawCellCallback,
   type EditableGridCell,
   type GridCell,
@@ -29,6 +31,7 @@ import { colToLetter, formatA1 } from "@/lib/grid/a1";
 import { notifyWorkbookEdit } from "@/lib/grid/calc-host";
 import { formatCellDisplay } from "@/lib/grid/format";
 import { useWorkbookStore } from "@/lib/grid/model";
+import { dataEdge, type Dir } from "@/lib/grid/navigate";
 import { outputsOf, srcBlockId } from "@/lib/grid/outputs";
 import { applyAnchorPick } from "@/lib/grid/run-block";
 import {
@@ -95,6 +98,7 @@ export default function SheetGrid() {
   const runningBlocks = useWorkbookStore((s) => s.runningBlocks);
   const flash = useWorkbookStore((s) => s.flash);
   const [gridSelection, setGridSelection] = useState<GridSelection>(EMPTY_SELECTION);
+  const editorRef = useRef<DataEditorRef>(null);
   const [menuCell, setMenuCell] = useState<{ r: number; c: number } | null>(null);
   const [hoverTip, setHoverTip] = useState<{ x: number; y: number; text: string } | null>(null);
 
@@ -432,6 +436,48 @@ export default function SheetGrid() {
     [sheet.rowCount, sheet.colCount],
   );
 
+  /** 앵커(활성 셀) 고정 + 반대 코너로 사각 선택 — glide·스토어 동시 갱신 (Ctrl+방향키·가장자리 점프 공용) */
+  const applySelection = useCallback(
+    (anchor: { r: number; c: number }, corner: { r: number; c: number }) => {
+      const r0 = Math.min(anchor.r, corner.r);
+      const r1 = Math.max(anchor.r, corner.r);
+      const c0 = Math.min(anchor.c, corner.c);
+      const c1 = Math.max(anchor.c, corner.c);
+      setGridSelection({
+        columns: CompactSelection.empty(),
+        rows: CompactSelection.empty(),
+        current: {
+          cell: [anchor.c, anchor.r],
+          range: { x: c0, y: r0, width: c1 - c0 + 1, height: r1 - r0 + 1 },
+          rangeStack: [],
+        },
+      });
+      useWorkbookStore.getState().setSelection({ r0, c0, r1, c1 });
+      editorRef.current?.scrollTo(corner.c, corner.r);
+    },
+    [],
+  );
+
+  /** 현재 선택에서 앵커·이동 코너를 dir 방향 dataEdge로 확장한 코너 계산 (엑셀 Ctrl+Shift+방향키) */
+  const extendCorner = useCallback(
+    (
+      anchor: { r: number; c: number },
+      rg: { x: number; y: number; width: number; height: number },
+      dir: Dir,
+    ): { r: number; c: number } => {
+      // 이동 코너 = 앵커의 반대쪽 코너
+      const corner = {
+        r: anchor.r === rg.y ? rg.y + rg.height - 1 : rg.y,
+        c: anchor.c === rg.x ? rg.x + rg.width - 1 : rg.x,
+      };
+      // 엑셀처럼 점프 기준은 앵커의 행/열에서 계산한다
+      return dir === "up" || dir === "down"
+        ? { r: dataEdge(sheet, { r: corner.r, c: anchor.c }, dir).r, c: corner.c }
+        : { r: corner.r, c: dataEdge(sheet, { r: anchor.r, c: corner.c }, dir).c };
+    },
+    [sheet],
+  );
+
   const onDelete = useCallback(
     (sel: GridSelection): boolean => {
       const store = useWorkbookStore.getState();
@@ -467,14 +513,51 @@ export default function SheetGrid() {
     [sheet.id],
   );
 
-  /** 클릭 라우팅: 출력 위치 지정 → 앵커 이동, 오류 셀 → 진단 탭(§2.3.7), 객체 카드 → 출력 미리보기 탭(§2.3.4) */
+  // glide의 isDoubleClick은 시간만 본다(500ms 내 아무 클릭) — 같은 셀 재클릭인지 직접 확인
+  const lastClickCell = useRef<{ r: number; c: number } | null>(null);
+
+  /** 클릭 라우팅: 출력 위치 지정 → 앵커 이동, Shift+더블클릭 → 데이터 끝 확장,
+   *  오류 셀 → 진단 탭(§2.3.7), 객체 카드 → 출력 미리보기 탭(§2.3.4) */
   const onCellClicked = useCallback(
-    (item: Item) => {
+    (item: Item, ev: CellClickedEventArgs) => {
       const [col, row] = item;
+      const prevClick = lastClickCell.current;
+      lastClickCell.current = { r: row, c: col };
       const picking = useWorkbookStore.getState().anchorPicking;
       if (picking) {
         applyAnchorPick(picking, sheet.id, { r: row, c: col });
         return;
+      }
+      // 엑셀 선택 가장자리 더블클릭 점프의 셀 그리드 대응:
+      // 수식어 없는 더블클릭은 항상 편집(glide 기본), Shift+더블클릭은 선택을 그 방향 데이터 끝까지 확장.
+      if (
+        ev.isDoubleClick === true &&
+        ev.shiftKey &&
+        prevClick?.r === row &&
+        prevClick?.c === col
+      ) {
+        const cur = gridSelection.current;
+        if (cur) {
+          const anchor = { r: cur.cell[1], c: cur.cell[0] };
+          const rg = cur.range;
+          // 클릭 셀이 앵커 반대쪽 가장자리에 있는 방향 (세로·가로 둘 다면 앵커에서 먼 축)
+          const cand: Dir[] = [];
+          if (row === rg.y + rg.height - 1 && row > anchor.r) cand.push("down");
+          if (row === rg.y && row < anchor.r) cand.push("up");
+          if (col === rg.x + rg.width - 1 && col > anchor.c) cand.push("right");
+          if (col === rg.x && col < anchor.c) cand.push("left");
+          const dir =
+            cand.length > 1
+              ? Math.abs(row - anchor.r) >= Math.abs(col - anchor.c)
+                ? cand.find((d) => d === "up" || d === "down")
+                : cand.find((d) => d === "left" || d === "right")
+              : cand[0];
+          if (dir) {
+            ev.preventDefault(); // 편집기 오픈 차단
+            applySelection(anchor, extendCorner(anchor, rg, dir));
+            return;
+          }
+        }
       }
       const key = cellKey(row, col);
       const cell = sheet.cells[key];
@@ -491,7 +574,7 @@ export default function SheetGrid() {
         store.setBottomTab("preview");
       }
     },
-    [sheet.cells, sheet.id, anchorMap],
+    [sheet.cells, sheet.id, anchorMap, gridSelection, applySelection, extendCorner],
   );
 
   /** 우클릭: 셀 기록(+선택 이동). radix ContextMenu가 메뉴를 연다 */
@@ -584,6 +667,37 @@ export default function SheetGrid() {
     buf.ts = now;
   }, []);
 
+  /** Ctrl+방향키(데이터 끝 이동) / Ctrl+Shift+방향키(데이터 끝까지 확장) — glide로 전파 차단.
+   *  나머지 키는 초고속 타이핑 버퍼로 넘긴다. 편집기(textarea·input) 오픈 중에는 불개입. */
+  const onWrapperKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      const dir = (
+        { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right" } as Record<
+          string,
+          Dir | undefined
+        >
+      )[e.key];
+      if (dir && (e.ctrlKey || e.metaKey) && !e.altKey) {
+        const t = e.target as HTMLElement;
+        if (t.tagName === "TEXTAREA" || t.tagName === "INPUT" || t.isContentEditable) return;
+        const cur = gridSelection.current;
+        if (!cur) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const anchor = { r: cur.cell[1], c: cur.cell[0] };
+        if (e.shiftKey) {
+          applySelection(anchor, extendCorner(anchor, cur.range, dir));
+        } else {
+          const dest = dataEdge(sheet, anchor, dir);
+          applySelection(dest, dest);
+        }
+        return;
+      }
+      bufferCanvasKey(e);
+    },
+    [gridSelection, sheet, applySelection, extendCorner, bufferCanvasKey],
+  );
+
   useEffect(() => {
     const portal = document.getElementById("portal");
     if (!portal) return;
@@ -611,8 +725,9 @@ export default function SheetGrid() {
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
-        <div className="relative min-h-0 min-w-0 flex-1" onKeyDownCapture={bufferCanvasKey}>
+        <div className="relative min-h-0 min-w-0 flex-1" onKeyDownCapture={onWrapperKeyDown}>
           <DataEditor
+            ref={editorRef}
             columns={columns}
             rows={sheet.rowCount}
             getCellContent={getCellContent}
