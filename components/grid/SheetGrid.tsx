@@ -30,6 +30,7 @@ import {
 import { colToLetter, formatA1 } from "@/lib/grid/a1";
 import { notifyWorkbookEdit } from "@/lib/grid/calc-host";
 import { formatCellDisplay } from "@/lib/grid/format";
+import { FORMULA_ERROR_KO, isFormula, isFormulaError } from "@/lib/grid/formula";
 import { useWorkbookStore } from "@/lib/grid/model";
 import { dataEdge, type Dir } from "@/lib/grid/navigate";
 import { outputsOf, srcBlockId } from "@/lib/grid/outputs";
@@ -75,10 +76,11 @@ const WARNING = "#D9A441";
 const DESTRUCTIVE = "#C2504A";
 const MUTED = "#6B7280";
 
-/** 단일 셀 편집 시 단순 유형 추론: 숫자 → n, TRUE/FALSE → b, 나머지 문자열 */
+/** 단일 셀 편집 시 단순 유형 추론: `=수식` → fx(값은 스토어 재계산이 채운다), 숫자 → n, TRUE/FALSE → b, 나머지 문자열 */
 function inferCell(text: string): Cell | null {
   const trimmed = text.trim();
   if (trimmed === "") return null;
+  if (isFormula(trimmed)) return { v: null, t: "n", fx: trimmed };
   if (/^(true|false)$/i.test(trimmed)) {
     return { v: trimmed.toLowerCase() === "true", t: "b" };
   }
@@ -261,8 +263,10 @@ export default function SheetGrid() {
             : undefined;
       return {
         kind: GridCellKind.Text,
+        // 수식 셀은 편집 시드가 수식 원문 (부록 I.3 — 편집 재진입 시 원문 표시)
         data:
-          typeof cell.v === "boolean" ? (cell.v ? "TRUE" : "FALSE") : String(cell.v ?? ""),
+          cell.fx ??
+          (typeof cell.v === "boolean" ? (cell.v ? "TRUE" : "FALSE") : String(cell.v ?? "")),
         displayData: formatCellDisplay(cell),
         // 잠긴(src) 셀도 편집 시도는 허용 — 커밋 시 스토어가 거부하고 안내 toast (§3.4)
         allowOverlay: true,
@@ -528,14 +532,16 @@ export default function SheetGrid() {
         applyAnchorPick(picking, sheet.id, { r: row, c: col });
         return;
       }
+      const sameAsPrev = prevClick?.r === row && prevClick?.c === col;
+      // glide isDoubleClick은 시간만 판정(500ms 내 아무 클릭) — 직전 클릭이 다른 셀이면
+      // 진짜 더블클릭이 아니므로 편집기 활성화를 막는다. Enter로 선택이 이동한 직후
+      // 다음 셀을 빠르게 클릭+타이핑할 때 오탐 활성화가 첫 입력을 유실시키는 것 방지.
+      if (ev.isDoubleClick === true && !sameAsPrev) {
+        ev.preventDefault(); // 활성화만 차단 — 아래 일반 클릭 라우팅은 그대로 수행
+      }
       // 엑셀 선택 가장자리 더블클릭 점프의 셀 그리드 대응:
       // 수식어 없는 더블클릭은 항상 편집(glide 기본), Shift+더블클릭은 선택을 그 방향 데이터 끝까지 확장.
-      if (
-        ev.isDoubleClick === true &&
-        ev.shiftKey &&
-        prevClick?.r === row &&
-        prevClick?.c === col
-      ) {
+      if (ev.isDoubleClick === true && ev.shiftKey && sameAsPrev) {
         const cur = gridSelection.current;
         if (cur) {
           const anchor = { r: cur.cell[1], c: cur.cell[0] };
@@ -610,6 +616,15 @@ export default function SheetGrid() {
       const [col, row] = args.location;
       const cell = sheet.cells[cellKey(row, col)];
       useWorkbookStore.getState().setHoverBlock(cell?.src ? srcBlockId(cell.src) : null);
+      // 수식 오류 셀 → 한국어 설명 (부록 I.3)
+      if (cell?.fx && cell.t === "e" && isFormulaError(cell.v)) {
+        setHoverTip({
+          x: args.bounds.x,
+          y: args.bounds.y + args.bounds.height + 4,
+          text: FORMULA_ERROR_KO[cell.v],
+        });
+        return;
+      }
       if (!cell?.src) {
         setHoverTip(null);
         return;

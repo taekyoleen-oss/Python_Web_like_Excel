@@ -2,7 +2,7 @@
 
 > 내부 프로젝트명은 PyGrid Studio이며 파일 확장자(.pygrid.json)·코드 식별자는 호환성을 위해 유지합니다.
 
-브라우저에서 서버 없이 실행되는 **Python in Excel** 스타일 워크북. 표를 붙여넣고, PY 블록에서 `xl("A1:C10", headers=True)` 참조로 시트 데이터를 받아 Pyodide(WASM)로 실행하고, 결과를 spill·객체 카드·이미지로 확인합니다.
+브라우저에서 서버 없이 실행되는 **Python in Excel** 스타일 워크북. 표를 붙여넣고, PY 블록에서 `xl("A1:C10", headers=True)` 참조로 시트 데이터를 받아 Pyodide(WASM)로 실행하고, 결과를 spill·객체 카드·이미지로 확인합니다. 셀에는 미니 수식(`=A1+B2*2`, `=SUM(A1:A10)` — 4칙연산·집계 5종)도 쓸 수 있고, 수식 값이 바뀌면 이를 참조하는 Python 블록이 자동 재실행됩니다.
 
 - 설계서: `docs/pygrid-studio-design.md` (모든 규칙의 마스터)
 - Excel과 다르게 동작하는 부분: `docs/domain/python-in-excel-parity.md`

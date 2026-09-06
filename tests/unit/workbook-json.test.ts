@@ -22,6 +22,8 @@ function sampleWorkbook(): Workbook {
     "3:0": { v: "2026-09-03", t: "d", f: "yyyy-mm-dd" },
     "4:0": { v: "#PYTHON!", t: "e", src: "blk1:out1" },
     "0:6": { v: 7, t: "n", src: "blk1:out2" },
+    "5:0": { v: 13.5, t: "n", fx: "=B2*2+SUM(A1:A3)" }, // 미니 수식 (부록 I)
+    "6:0": { v: "#DIV/0!", t: "e", fx: "=1/0" },
   };
   wb.sheets[0].colWidths = { 0: 120 };
   wb.sheets[0].frozenCols = 1;
@@ -106,6 +108,16 @@ describe("workbook-json", () => {
     delete expected.pyBlocks[0].last!.imageBlobId; // 유일하게 허용되는 차이
     delete expected.pyBlocks[0].outputs![0].last!.imageBlobId;
     expect(restored).toEqual(expected);
+  });
+
+  it("미니 수식 fx 왕복 보존 — 값 캐시·오류 셀 포함 (부록 I)", () => {
+    const restored = parseWorkbookJson(serializeWorkbook(sampleWorkbook()));
+    expect(restored.sheets[0].cells["5:0"]).toEqual({
+      v: 13.5,
+      t: "n",
+      fx: "=B2*2+SUM(A1:A3)",
+    });
+    expect(restored.sheets[0].cells["6:0"]).toEqual({ v: "#DIV/0!", t: "e", fx: "=1/0" });
   });
 
   it("v1.2 다중 출력 왕복 보존 — outputs가 정본, 레거시 필드는 outputs[0]와 동기", () => {

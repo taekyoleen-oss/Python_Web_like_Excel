@@ -26,7 +26,7 @@ import {
   type RunResult,
   type Sheet,
 } from "@/types/workbook";
-import { useWorkbookStore, type OutputApply } from "./model";
+import { setFormulaNotifier, useWorkbookStore, type OutputApply } from "./model";
 import { outputsOf, srcBlockId, srcTag } from "./outputs";
 import { checkSpillConflict } from "./spill";
 
@@ -421,6 +421,10 @@ export function notifyWorkbookEdit(ranges: SheetRange[], editedBlockIds: string[
     void markDirtyManual(ranges, editedBlockIds);
   }
 }
+
+// 미니 수식 재계산으로 v가 바뀐 셀 → 의존 Python 블록 dirty/재실행 (부록 I.2).
+// 스토어가 직접 import하면 순환이라 콜백으로 등록한다.
+setFormulaNotifier((ranges) => notifyWorkbookEdit(ranges));
 
 /** §4.8: 준비 전 실행 요청은 큐잉된다 — 문구만 안내 */
 export function toastIfQueued(): void {

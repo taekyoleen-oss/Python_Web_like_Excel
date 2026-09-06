@@ -12,6 +12,11 @@ export interface Cell {
    * 구 워크북의 `"<blockId>"` 단독 표기는 로드 시 정규화된다 (부록 D.1).
    */
   src?: string;
+  /**
+   * 미니 수식 원문 (부록 I). `=` 포함 저장, `v`는 계산 결과 캐시
+   * (`t:'n'` 숫자 또는 `t:'e'` + 오류 코드). 선택 필드라 기존 워크북 호환.
+   */
+  fx?: string;
 }
 
 export interface Sheet {

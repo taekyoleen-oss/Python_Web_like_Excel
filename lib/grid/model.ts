@@ -21,6 +21,7 @@ import {
   type Workbook,
 } from "@/types/workbook";
 import { colToLetter } from "./a1";
+import { recalcAfter, type SheetRange } from "./formula-engine";
 import { markdownTitle } from "./markdown";
 import {
   newId,
@@ -93,16 +94,53 @@ export interface AnchorPickTarget {
   outputId: string;
 }
 
-/** 지정 출력(outputId 생략 시 블록 전체)의 spill 셀 제거 — 다른 시트 출력까지 훑는다 */
-function clearSpillCells(wb: Workbook, blockId: string, outputId?: string): void {
+// ── 미니 수식 재계산 훅 (부록 I.2) ─────────────────────────
+// 셀을 쓰는 모든 액션이 같은 트랜잭션 안에서 recalcFormulas를 부른다.
+// v가 바뀐 수식 셀은 편집 통지(notifyWorkbookEdit)로 이어진다 — calc-host가
+// 등록한다(모듈 import 순환 방지). 통지는 set 트랜잭션 밖(microtask)에서.
+let formulaNotify: ((ranges: SheetRange[]) => void) | null = null;
+export const setFormulaNotifier = (fn: (ranges: SheetRange[]) => void): void => {
+  formulaNotify = fn;
+};
+
+/** edited === "all"은 전체 재계산(시트 추가/삭제/이름 변경 등 구조 변경) */
+function recalcFormulas(wb: Workbook, edited: SheetRange[] | "all"): void {
+  const changed = recalcAfter(wb, edited === "all" ? null : edited);
+  if (changed.length > 0 && formulaNotify) {
+    const fn = formulaNotify;
+    queueMicrotask(() => fn(changed));
+  }
+}
+
+/**
+ * 지정 출력(outputId 생략 시 블록 전체)의 spill 셀 제거 — 다른 시트 출력까지 훑는다.
+ * 반환: 지워진 셀의 시트별 경계 상자 (수식 재계산 대상)
+ */
+function clearSpillCells(wb: Workbook, blockId: string, outputId?: string): SheetRange[] {
   const tag = outputId === undefined ? undefined : srcTag(blockId, outputId);
+  const boxes: SheetRange[] = [];
   for (const sheet of wb.sheets) {
+    let box: SheetRange | null = null;
     for (const key of Object.keys(sheet.cells)) {
       const src = sheet.cells[key].src;
       if (!src) continue;
-      if (tag ? src === tag : srcBlockId(src) === blockId) delete sheet.cells[key];
+      if (tag ? src === tag : srcBlockId(src) === blockId) {
+        delete sheet.cells[key];
+        const { r, c } = parseCellKey(key);
+        box = box
+          ? {
+              sheetId: sheet.id,
+              r0: Math.min(box.r0, r),
+              c0: Math.min(box.c0, c),
+              r1: Math.max(box.r1, r),
+              c1: Math.max(box.c1, c),
+            }
+          : { sheetId: sheet.id, r0: r, c0: c, r1: r, c1: c };
+      }
     }
+    if (box) boxes.push(box);
   }
+  return boxes;
 }
 
 /** 새 출력·블록 자리 찾기용: 값·spill·블록 앵커·다른 출력 앵커가 있으면 쓸 수 없다 */
@@ -325,10 +363,22 @@ export const createWorkbookStore = () => {
       immer((set, get) => {
         const wb = createWorkbook();
 
-        const mutateSheet = (sheetId: string, fn: (sheet: Sheet) => void) =>
+        /** edited가 있으면 같은 트랜잭션에서 수식 재계산 (부록 I.2 — 공통 후처리 지점) */
+        const mutateSheet = (
+          sheetId: string,
+          fn: (sheet: Sheet) => void,
+          edited?: CellRange[] | "all",
+        ) =>
           set((state) => {
             const sheet = state.workbook.sheets.find((s) => s.id === sheetId);
-            if (sheet) fn(sheet);
+            if (!sheet) return;
+            fn(sheet);
+            if (edited !== undefined) {
+              recalcFormulas(
+                state.workbook,
+                edited === "all" ? "all" : edited.map((rg) => ({ ...norm(rg), sheetId })),
+              );
+            }
           });
 
         return {
@@ -354,37 +404,49 @@ export const createWorkbookStore = () => {
             if (!sheet) return false;
             const key = cellKey(r, c);
             if (sheet.cells[key]?.src) return false; // spill 셀은 직접 편집 금지
-            mutateSheet(sheetId, (sh) => {
-              if (cell === null) delete sh.cells[key];
-              else sh.cells[key] = cell;
-              if (r >= sh.rowCount) sh.rowCount = r + 1;
-              if (c >= sh.colCount) sh.colCount = c + 1;
-            });
-            return true;
-          },
-
-          setCells: (sheetId, edits) =>
-            mutateSheet(sheetId, (sh) => {
-              for (const { r, c, cell } of edits) {
-                const key = cellKey(r, c);
+            mutateSheet(
+              sheetId,
+              (sh) => {
                 if (cell === null) delete sh.cells[key];
                 else sh.cells[key] = cell;
                 if (r >= sh.rowCount) sh.rowCount = r + 1;
                 if (c >= sh.colCount) sh.colCount = c + 1;
-              }
-            }),
+              },
+              [{ r0: r, c0: c, r1: r, c1: c }],
+            );
+            return true;
+          },
+
+          setCells: (sheetId, edits) =>
+            mutateSheet(
+              sheetId,
+              (sh) => {
+                for (const { r, c, cell } of edits) {
+                  const key = cellKey(r, c);
+                  if (cell === null) delete sh.cells[key];
+                  else sh.cells[key] = cell;
+                  if (r >= sh.rowCount) sh.rowCount = r + 1;
+                  if (c >= sh.colCount) sh.colCount = c + 1;
+                }
+              },
+              edits.map(({ r, c }) => ({ r0: r, c0: c, r1: r, c1: c })),
+            ),
 
           clearRange: (sheetId, range) =>
-            mutateSheet(sheetId, (sh) => {
-              const { r0, c0, r1, c1 } = norm(range);
-              // ponytail: 저장된 셀 전체 스캔 O(cells) — 범위 인덱스가 필요해지면 교체
-              for (const key of Object.keys(sh.cells)) {
-                const { r, c } = parseCellKey(key);
-                if (r >= r0 && r <= r1 && c >= c0 && c <= c1 && !sh.cells[key].src) {
-                  delete sh.cells[key];
+            mutateSheet(
+              sheetId,
+              (sh) => {
+                const { r0, c0, r1, c1 } = norm(range);
+                // ponytail: 저장된 셀 전체 스캔 O(cells) — 범위 인덱스가 필요해지면 교체
+                for (const key of Object.keys(sh.cells)) {
+                  const { r, c } = parseCellKey(key);
+                  if (r >= r0 && r <= r1 && c >= c0 && c <= c1 && !sh.cells[key].src) {
+                    delete sh.cells[key];
+                  }
                 }
-              }
-            }),
+              },
+              [range],
+            ),
 
           insertRows: (sheetId, index, count) =>
             mutateSheet(sheetId, (sh) => {
@@ -393,7 +455,7 @@ export const createWorkbookStore = () => {
               sh.cells = remapCells(sh.cells, (r, c) =>
                 r >= index ? [r + count, c] : [r, c],
               );
-            }),
+            }, "all"),
 
           deleteRows: (sheetId, index, count) =>
             mutateSheet(sheetId, (sh) => {
@@ -404,7 +466,7 @@ export const createWorkbookStore = () => {
                 if (r < index + count) return null;
                 return [r - count, c];
               });
-            }),
+            }, "all"),
 
           insertCols: (sheetId, index, count) =>
             mutateSheet(sheetId, (sh) => {
@@ -416,7 +478,7 @@ export const createWorkbookStore = () => {
               sh.colWidths = remapWidths(sh.colWidths, (c) =>
                 c >= index ? c + count : c,
               );
-            }),
+            }, "all"),
 
           deleteCols: (sheetId, index, count) =>
             mutateSheet(sheetId, (sh) => {
@@ -436,7 +498,7 @@ export const createWorkbookStore = () => {
                 // setFrozenCols와 같은 불변식: 최대 colCount - 1
                 sh.frozenCols = Math.min(sh.frozenCols, sh.colCount - 1);
               }
-            }),
+            }, "all"),
 
           addSheet: () =>
             set((state) => {
@@ -463,14 +525,20 @@ export const createWorkbookStore = () => {
               state.workbook.sheets.push(sheet);
               state.activeSheetId = sheet.id;
               state.selection = null;
+              recalcFormulas(state.workbook, "all"); // 새 시트 이름 참조가 해석될 수 있다
             }),
 
           renameSheet: (sheetId, name) => {
             const trimmed = name.trim();
             if (trimmed === "") return;
-            mutateSheet(sheetId, (sh) => {
-              sh.name = trimmed;
-            });
+            // 이름 참조("Sheet2!A1") 해석이 바뀌므로 전체 재계산
+            mutateSheet(
+              sheetId,
+              (sh) => {
+                sh.name = trimmed;
+              },
+              "all",
+            );
           },
 
           removeSheet: (sheetId) =>
@@ -484,6 +552,7 @@ export const createWorkbookStore = () => {
                 state.activeSheetId = sheets[Math.max(0, idx - 1)].id;
                 state.selection = null;
               }
+              recalcFormulas(state.workbook, "all"); // 지워진 시트 참조 → #REF!
             }),
 
           moveSheet: (sheetId, offset) =>
@@ -634,7 +703,8 @@ export const createWorkbookStore = () => {
               const b = state.workbook.pyBlocks.find((x) => x.id === blockId);
               const o = b?.outputs?.find((x) => x.id === outputId);
               if (!b || !o) return;
-              clearSpillCells(state.workbook, blockId, outputId);
+              const cleared = clearSpillCells(state.workbook, blockId, outputId);
+              if (cleared.length > 0) recalcFormulas(state.workbook, cleared);
               if (o.last?.spillRange) delete o.last.spillRange; // 옛 위치의 spill 테두리 제거
               o.anchor = { r: target.r, c: target.c };
               if (b.outputs![0].id === outputId) {
@@ -668,8 +738,9 @@ export const createWorkbookStore = () => {
               const a = state.workbook.pyBlocks.find((b) => b.id === id);
               const b = state.workbook.pyBlocks.find((x) => x.id === otherId);
               if (!a || !b) return;
+              const cleared: SheetRange[] = [];
               for (const blk of [a, b]) {
-                clearSpillCells(state.workbook, blk.id);
+                cleared.push(...clearSpillCells(state.workbook, blk.id));
                 for (const o of blk.outputs ?? []) {
                   if (o.last?.spillRange) delete o.last.spillRange;
                 }
@@ -694,6 +765,7 @@ export const createWorkbookStore = () => {
                   delete first.sheetId;
                 }
               }
+              if (cleared.length > 0) recalcFormulas(state.workbook, cleared);
             });
             return otherId;
           },
@@ -702,8 +774,9 @@ export const createWorkbookStore = () => {
             set((state) => {
               const idx = state.workbook.pyBlocks.findIndex((b) => b.id === id);
               if (idx < 0) return;
-              clearSpillCells(state.workbook, id); // 다른 시트에 놓인 출력까지
+              const cleared = clearSpillCells(state.workbook, id); // 다른 시트에 놓인 출력까지
               state.workbook.pyBlocks.splice(idx, 1);
+              if (cleared.length > 0) recalcFormulas(state.workbook, cleared);
               delete state.runningBlocks[id];
               delete state.dirtyBlocks[id];
               if (state.focusBlockId === id) state.focusBlockId = null;
@@ -765,9 +838,10 @@ export const createWorkbookStore = () => {
               if (!b?.outputs || b.outputs.length <= 1) return; // 마지막 출력은 남긴다
               const i = b.outputs.findIndex((o) => o.id === outputId);
               if (i < 0) return;
-              clearSpillCells(state.workbook, blockId, outputId);
+              const cleared = clearSpillCells(state.workbook, blockId, outputId);
               b.outputs.splice(i, 1);
               syncLegacy(b);
+              if (cleared.length > 0) recalcFormulas(state.workbook, cleared);
               state.dirtyBlocks[blockId] = true;
             }),
 
@@ -850,6 +924,7 @@ export const createWorkbookStore = () => {
             set((state) => {
               const block = state.workbook.pyBlocks.find((b) => b.id === blockId);
               if (!block) return;
+              const edited: SheetRange[] = []; // spill 반영도 수식 재계산 대상 (부록 I.2)
               for (const res of results) {
                 const binding = block.outputs?.find((o) => o.id === res.outputId);
                 if (!binding) continue;
@@ -859,9 +934,22 @@ export const createWorkbookStore = () => {
                 if (!sheet) continue;
                 const tag = srcTag(blockId, binding.id);
                 if (res.clearPrevious) {
+                  let box: SheetRange | null = null;
                   for (const key of Object.keys(sheet.cells)) {
-                    if (sheet.cells[key].src === tag) delete sheet.cells[key];
+                    if (sheet.cells[key].src !== tag) continue;
+                    delete sheet.cells[key];
+                    const { r, c } = parseCellKey(key);
+                    box = box
+                      ? {
+                          sheetId: sheet.id,
+                          r0: Math.min(box.r0, r),
+                          c0: Math.min(box.c0, c),
+                          r1: Math.max(box.r1, r),
+                          c1: Math.max(box.c1, c),
+                        }
+                      : { sheetId: sheet.id, r0: r, c0: c, r1: r, c1: c };
                   }
+                  if (box) edited.push(box);
                 }
                 res.cells.forEach((row, i) =>
                   row.forEach((cell, j) => {
@@ -872,9 +960,19 @@ export const createWorkbookStore = () => {
                     if (c >= sheet.colCount) sheet.colCount = c + 1;
                   }),
                 );
+                if (res.cells.length > 0 && res.cells[0].length > 0) {
+                  edited.push({
+                    sheetId: sheet.id,
+                    r0: binding.anchor.r,
+                    c0: binding.anchor.c,
+                    r1: binding.anchor.r + res.cells.length - 1,
+                    c1: binding.anchor.c + res.cells[0].length - 1,
+                  });
+                }
                 if (res.last) binding.last = res.last;
               }
               syncLegacy(block);
+              if (edited.length > 0) recalcFormulas(state.workbook, edited);
             }),
 
           applyBlockResult: (blockId, cells, opts) => {
