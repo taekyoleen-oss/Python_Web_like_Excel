@@ -72,6 +72,22 @@ export function blocksInOrder(workbook: Workbook): PyBlock[] {
   );
 }
 
+/** 부록 J.2: 범위 전체가 굵은지 (굵게 토글 판정). src 셀은 판정 제외, 서식 없는 셀이 있으면 false */
+export function isRangeBold(sheet: Sheet, range: CellRange): boolean {
+  const r0 = Math.min(range.r0, range.r1);
+  const r1 = Math.max(range.r0, range.r1);
+  const c0 = Math.min(range.c0, range.c1);
+  const c1 = Math.max(range.c0, range.c1);
+  for (let r = r0; r <= r1; r++) {
+    for (let c = c0; c <= c1; c++) {
+      const cell = sheet.cells[cellKey(r, c)];
+      if (cell?.src) continue;
+      if (!cell?.st?.b) return false;
+    }
+  }
+  return true;
+}
+
 export interface CellEdit {
   r: number;
   c: number;
@@ -186,6 +202,10 @@ export interface WorkbookState {
   aiChatOpen: boolean;
   /** 상단 뷰 전환 — 워크북 | 데이터 예제/분석 (부록 E, 설정에 저장, undo 대상 아님) */
   view: "workbook" | "reference";
+  /** 부록 J.3: 블록별 마지막 성공 실행이 읽은 xl() 참조 범위 (transient — 이력·저장 무관) */
+  executedRefs: Record<string, SheetRange[]>;
+  /** 부록 J.3: 실행 참조 표시 토글 (기본 켬, 설정에 저장, undo 대상 아님) */
+  showRefs: boolean;
   /** spill 잠김(src) 셀이면 false를 반환하고 아무것도 바꾸지 않는다 */
   setCellValue: (sheetId: string, r: number, c: number, cell: Cell | null) => boolean;
   /** 일괄 편집 = 한 트랜잭션 = 한 undo 단계 */
@@ -285,6 +305,16 @@ export interface WorkbookState {
   setBottomTab: (tab: WorkbookState["bottomTab"]) => void;
   setLastEditorBlock: (id: string | null) => void;
   setAnchorPicking: (target: AnchorPickTarget | null) => void;
+  /** 부록 J.2: 선택 범위에 셀 서식 병합 적용 — src 셀 제외, 한 트랜잭션(= 한 undo).
+   *  b: false·fs: null은 해당 서식 제거. 빈 셀에도 적용 가능({v:null} 셀 생성) */
+  applyCellStyle: (
+    sheetId: string,
+    range: CellRange,
+    patch: { b?: boolean; fs?: number | null },
+  ) => void;
+  /** 부록 J.3: 성공 실행의 참조 기록 (null이면 제거) */
+  setExecutedRefs: (blockId: string, refs: SheetRange[] | null) => void;
+  setShowRefs: (show: boolean) => void;
   setTocOpen: (open: boolean) => void;
   setAiChatOpen: (open: boolean) => void;
   setView: (view: "workbook" | "reference") => void;
@@ -398,6 +428,8 @@ export const createWorkbookStore = () => {
           tocOpen: false,
           aiChatOpen: false,
           view: "workbook" as const,
+          executedRefs: {},
+          showRefs: true,
 
           setCellValue: (sheetId, r, c, cell) => {
             const sheet = get().workbook.sheets.find((s) => s.id === sheetId);
@@ -605,6 +637,7 @@ export const createWorkbookStore = () => {
               state.selection = null;
               state.runningBlocks = {};
               state.dirtyBlocks = {};
+              state.executedRefs = {};
               state.selectedBlockId = null;
               state.lastEditorBlockId = null;
               state.hoverBlockId = null;
@@ -623,6 +656,7 @@ export const createWorkbookStore = () => {
               // 이전 워크북의 transient 상태(실행 중·dirty 등) 정리 (§M7.5)
               state.runningBlocks = {};
               state.dirtyBlocks = {};
+              state.executedRefs = {};
               state.selectedBlockId = null;
               state.lastEditorBlockId = null;
               state.hoverBlockId = null;
@@ -779,6 +813,7 @@ export const createWorkbookStore = () => {
               if (cleared.length > 0) recalcFormulas(state.workbook, cleared);
               delete state.runningBlocks[id];
               delete state.dirtyBlocks[id];
+              delete state.executedRefs[id];
               if (state.focusBlockId === id) state.focusBlockId = null;
               if (state.selectedBlockId === id) state.selectedBlockId = null;
               if (state.lastEditorBlockId === id) state.lastEditorBlockId = null;
@@ -1048,6 +1083,46 @@ export const createWorkbookStore = () => {
           setAnchorPicking: (target) =>
             set((state) => {
               state.anchorPicking = target;
+            }),
+
+          applyCellStyle: (sheetId, range, patch) =>
+            mutateSheet(sheetId, (sh) => {
+              const { r0, c0, r1, c1 } = norm(range);
+              for (let r = r0; r <= r1; r++) {
+                for (let c = c0; c <= c1; c++) {
+                  const key = cellKey(r, c);
+                  const cell = sh.cells[key];
+                  if (cell?.src) continue; // spill 잠금 셀 제외
+                  const st = { ...cell?.st };
+                  if (patch.b !== undefined) {
+                    if (patch.b) st.b = true;
+                    else delete st.b;
+                  }
+                  if (patch.fs !== undefined) {
+                    if (patch.fs === null) delete st.fs;
+                    else st.fs = patch.fs;
+                  }
+                  const hasSt = st.b !== undefined || st.fs !== undefined;
+                  if (cell) {
+                    if (hasSt) cell.st = st;
+                    else if (cell.v === null && !cell.fx) delete sh.cells[key]; // 서식만 있던 빈 셀
+                    else delete cell.st;
+                  } else if (hasSt) {
+                    sh.cells[key] = { v: null, t: "s", st }; // 빈 셀에도 서식 적용 (엑셀 동일)
+                  }
+                }
+              }
+            }),
+
+          setExecutedRefs: (blockId, refs) =>
+            set((state) => {
+              if (refs === null) delete state.executedRefs[blockId];
+              else state.executedRefs[blockId] = refs;
+            }),
+
+          setShowRefs: (show) =>
+            set((state) => {
+              state.showRefs = show;
             }),
 
           setTocOpen: (open) =>

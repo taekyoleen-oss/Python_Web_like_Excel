@@ -15,6 +15,7 @@ export type Inline =
   | { t: "em"; v: string }
   | { t: "code"; v: string }
   | { t: "link"; v: string; href: string }
+  | { t: "img"; v: string; href: string }
   | { t: "br"; v: "" };
 
 /** 목록 항목 — 중첩 목록(2칸·탭 들여쓰기)을 자식으로 가질 수 있다 */
@@ -37,12 +38,14 @@ export type MdNode =
   | { t: "quote"; children: MdNode[] }
   | { t: "hr" };
 
-// 코드 스팬 우선(그 안의 *·[]는 서식이 아니다) → 굵게 → 기울임 → 링크
+// 코드 스팬 우선(그 안의 *·[]는 서식이 아니다) → 굵게 → 기울임 → 이미지 → 링크
 const INLINE_RE =
-  /`([^`\n]+)`|\*\*([^*\n]+)\*\*|\*([^*\n]+)\*|\[([^\]\n]*)\]\(([^)\s]*)\)/g;
+  /`([^`\n]+)`|\*\*([^*\n]+)\*\*|\*([^*\n]+)\*|!\[([^\]\n]*)\]\(([^)\s]*)\)|\[([^\]\n]*)\]\(([^)\s]*)\)/g;
 
 /** javascript: 등 실행 가능한 주소는 링크로 만들지 않는다 (공유 파일 = 신뢰 경계) */
 const SAFE_HREF = /^(?:https?:\/\/|mailto:|#|\/)/i;
+/** 이미지 src는 data:image/*·https:만 허용 (부록 J.1 — data:text/html 등 차단) */
+const SAFE_IMG_SRC = /^(?:data:image\/|https:\/\/)/i;
 
 function inlineTokens(text: string): Inline[] {
   const out: Inline[] = [];
@@ -59,7 +62,10 @@ function inlineTokens(text: string): Inline[] {
     if (m[1] !== undefined) out.push({ t: "code", v: m[1] });
     else if (m[2] !== undefined) out.push({ t: "strong", v: m[2] });
     else if (m[3] !== undefined) out.push({ t: "em", v: m[3] });
-    else if (SAFE_HREF.test(m[5])) out.push({ t: "link", v: m[4], href: m[5] });
+    else if (m[4] !== undefined) {
+      if (SAFE_IMG_SRC.test(m[5])) out.push({ t: "img", v: m[4], href: m[5] });
+      else pushText(m[0]); // 안전하지 않은 이미지 src → 원문 그대로 평문
+    } else if (SAFE_HREF.test(m[7])) out.push({ t: "link", v: m[6], href: m[7] });
     else pushText(m[0]); // 안전하지 않은 주소 → 원문 그대로 평문
   }
   pushText(text.slice(last));
@@ -208,6 +214,13 @@ function inlineNodes(items: Inline[]): ReactNode[] {
           },
           n.v,
         );
+      case "img":
+        return createElement("img", {
+          key: i,
+          src: n.href,
+          alt: n.v,
+          className: "my-1 max-w-full rounded",
+        });
       case "br":
         return createElement("br", { key: i });
       default:
@@ -307,6 +320,110 @@ export function markdownTitle(src: string): string {
   if (first) return truncate(first.text);
   const line = src.split(/\r?\n/).find((l) => l.trim() !== "");
   return line ? truncate(line.trim()) : "";
+}
+
+// ── 편집 툴바 헬퍼 (부록 J.1) — textarea 선택 기반 삽입/감싸기, 순수 함수 ──
+
+export type MdAction =
+  | "h1"
+  | "h2"
+  | "h3"
+  | "subheading"
+  | "bold"
+  | "ul"
+  | "ol"
+  | "code"
+  | "hr";
+
+export interface MdEditResult {
+  text: string;
+  /** 편집 후 선택(커서) 위치 */
+  start: number;
+  end: number;
+}
+
+const lineStartAt = (text: string, pos: number): number =>
+  text.lastIndexOf("\n", Math.max(0, pos - 1)) + 1;
+const lineEndAt = (text: string, pos: number): number => {
+  const i = text.indexOf("\n", pos);
+  return i === -1 ? text.length : i;
+};
+
+/** 선택(또는 커서)의 각 줄에 prefix 적용. make(i)로 줄별 접두어 생성 */
+function prefixLines(
+  text: string,
+  start: number,
+  end: number,
+  make: (i: number) => string,
+): MdEditResult {
+  const s = lineStartAt(text, start);
+  const e = lineEndAt(text, Math.max(start, end - (end > start && text[end - 1] === "\n" ? 1 : 0)));
+  const lines = text.slice(s, e).split("\n");
+  const body = lines
+    .map((line, i) => make(i) + line.replace(/^(\s*)(?:[-*+]|\d+[.)])\s+/, "$1"))
+    .join("\n");
+  return { text: text.slice(0, s) + body + text.slice(e), start: s, end: s + body.length };
+}
+
+/**
+ * 마크다운 서식 액션 적용 (부록 J.1 툴바). 커서/선택 기준으로 문법을 삽입·감싼다.
+ * subheading: 커서 위(포함)의 가장 가까운 헤딩보다 한 단계 깊은 헤딩 줄 삽입 (최하 ###).
+ */
+export function applyMdAction(
+  text: string,
+  start: number,
+  end: number,
+  action: MdAction,
+): MdEditResult {
+  const wrap = (mark: string): MdEditResult => {
+    const sel = text.slice(start, end);
+    const next = text.slice(0, start) + mark + sel + mark + text.slice(end);
+    return sel === ""
+      ? { text: next, start: start + mark.length, end: start + mark.length }
+      : { text: next, start, end: end + mark.length * 2 };
+  };
+  const heading = (level: number): MdEditResult => {
+    const s = lineStartAt(text, start);
+    const e = lineEndAt(text, s);
+    const line = text.slice(s, e).replace(/^#{1,6}\s*/, "");
+    const body = `${"#".repeat(level)} ${line}`;
+    return { text: text.slice(0, s) + body + text.slice(e), start: s + body.length, end: s + body.length };
+  };
+
+  switch (action) {
+    case "h1":
+      return heading(1);
+    case "h2":
+      return heading(2);
+    case "h3":
+      return heading(3);
+    case "subheading": {
+      // 커서가 속한/위의 마지막 헤딩 레벨 + 1 (없으면 1, 최하 3)
+      const before = text.slice(0, lineEndAt(text, start));
+      const levels = [...before.matchAll(/^(#{1,6})\s/gm)].map((m) => m[1].length);
+      const level = Math.min((levels[levels.length - 1] ?? 0) + 1, 3);
+      const e = lineEndAt(text, start);
+      const ins = `${e > 0 && text !== "" ? "\n" : ""}${"#".repeat(level)} `;
+      const next = text.slice(0, e) + ins + text.slice(e);
+      const pos = e + ins.length;
+      return { text: next, start: pos, end: pos };
+    }
+    case "bold":
+      return wrap("**");
+    case "code":
+      return wrap("`");
+    case "ul":
+      return prefixLines(text, start, end, () => "- ");
+    case "ol":
+      return prefixLines(text, start, end, (i) => `${i + 1}. `);
+    case "hr": {
+      const e = lineEndAt(text, start);
+      const ins = `${text === "" ? "" : "\n"}\n---\n`;
+      const next = text.slice(0, e) + ins + text.slice(e);
+      const pos = e + ins.length;
+      return { text: next, start: pos, end: pos };
+    }
+  }
 }
 
 export interface TocEntry {

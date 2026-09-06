@@ -9,6 +9,7 @@ import { setCalcModeEverywhere } from "@/lib/grid/calc-host";
 import { useWorkbookStore } from "@/lib/grid/model";
 import { getRuntimeClient } from "@/lib/runtime/client";
 import type { SaveStatus } from "@/lib/storage/autosave";
+import { saveSettings } from "@/lib/storage/db";
 
 const SAVE_LABEL: Record<SaveStatus, string> = {
   saved: "✓ 저장됨",
@@ -68,6 +69,7 @@ export default function StatusBar({ saveStatus }: { saveStatus: SaveStatus }) {
   const blockCount = useWorkbookStore((s) => s.workbook.pyBlocks.length);
   const dirtyCount = useWorkbookStore((s) => Object.keys(s.dirtyBlocks).length);
   const picking = useWorkbookStore((s) => !!s.anchorPicking);
+  const showRefs = useWorkbookStore((s) => s.showRefs);
 
   return (
     <div className="flex h-7 shrink-0 items-center gap-4 border-t bg-muted/60 px-3 text-xs text-muted-foreground">
@@ -83,6 +85,18 @@ export default function StatusBar({ saveStatus }: { saveStatus: SaveStatus }) {
         블록 {blockCount}
         {dirtyCount > 0 ? ` (dirty ${dirtyCount})` : ""}
       </span>
+      {/* 부록 J.3: 실행 참조 표시 토글 (기본 켬) */}
+      <button
+        onClick={() => {
+          useWorkbookStore.getState().setShowRefs(!showRefs);
+          void saveSettings({ showRefs: !showRefs });
+        }}
+        className={showRefs ? "font-medium text-[#1F6E64]" : "hover:text-foreground"}
+        title="블록이 마지막 성공 실행에서 읽은 xl() 참조 범위를 그리드에 표시"
+        aria-pressed={showRefs}
+      >
+        참조 표시 {showRefs ? "켬" : "끔"}
+      </button>
       <button
         onClick={() => setCalcModeEverywhere(calcMode === "auto" ? "manual" : "auto")}
         className={calcMode === "manual" ? "font-medium text-warning-text" : "hover:text-foreground"}

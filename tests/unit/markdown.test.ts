@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { isValidElement, type ReactNode } from "react";
 import {
+  applyMdAction,
   buildToc,
   markdownHeadings,
   markdownTitle,
@@ -246,5 +247,70 @@ describe("목차 구성", () => {
       [1, "그냥 메모"],
       [1, "(빈 마크다운)"],
     ]);
+  });
+});
+
+describe("이미지 (부록 J.1)", () => {
+  it("data:image/*·https: src만 <img>로 렌더", () => {
+    const png = "data:image/png;base64,iVBORw0KGgo=";
+    let img = findTag(renderMarkdown(`![차트](${png})`), "img");
+    expect(img).toMatchObject({ src: png, alt: "차트" });
+    img = findTag(renderMarkdown("![외부](https://example.com/a.png)"), "img");
+    expect(img).toMatchObject({ src: "https://example.com/a.png" });
+  });
+
+  it("javascript:·data:text/html 등 위험 src는 평문으로", () => {
+    for (const src of [
+      "javascript:alert(1)",
+      "data:text/html,<script>alert(1)</script>",
+      "http://insecure.example/a.png",
+      "vbscript:x",
+    ]) {
+      const md = `![x](${src})`;
+      const { tags, text } = collect(renderMarkdown(md));
+      expect(tags).not.toContain("img");
+      expect(text.join("")).toContain(`![x](${src.split(",")[0]}`.slice(0, 10));
+    }
+  });
+
+  it("이미지 alt는 제목·목차 텍스트에 포함된다", () => {
+    expect(markdownTitle("![그림](data:image/png;base64,AA==) 설명")).toContain("그림");
+  });
+});
+
+describe("applyMdAction (부록 J.1 서식 툴바)", () => {
+  it("제목: 현재 줄 접두어 교체 (기존 헤딩 제거 후)", () => {
+    expect(applyMdAction("제목입니다", 3, 3, "h2").text).toBe("## 제목입니다");
+    expect(applyMdAction("# 제목", 4, 4, "h3").text).toBe("### 제목");
+    expect(applyMdAction("첫줄\n둘째줄", 6, 6, "h1").text).toBe("첫줄\n# 둘째줄");
+  });
+
+  it("하위 제목: 위 헤딩 +1 단계 (없으면 #, 최하 ###)", () => {
+    const r1 = applyMdAction("# 큰제목\n본문", 9, 9, "subheading");
+    expect(r1.text).toBe("# 큰제목\n본문\n## ");
+    expect(r1.start).toBe(r1.text.length);
+    expect(applyMdAction("본문뿐", 1, 1, "subheading").text).toBe("본문뿐\n# ");
+    expect(applyMdAction("### 깊음\n글", 9, 9, "subheading").text).toBe("### 깊음\n글\n### ");
+  });
+
+  it("굵게·인라인 코드: 선택 감싸기, 빈 선택은 커서를 가운데로", () => {
+    const r = applyMdAction("안녕 세상", 3, 5, "bold");
+    expect(r.text).toBe("안녕 **세상**");
+    expect([r.start, r.end]).toEqual([3, 9]);
+    const empty = applyMdAction("ab", 1, 1, "code");
+    expect(empty.text).toBe("a``b");
+    expect(empty.start).toBe(2);
+  });
+
+  it("목록: 선택된 각 줄에 접두어 (번호 목록은 증가)", () => {
+    expect(applyMdAction("하나\n둘\n셋", 0, 8, "ul").text).toBe("- 하나\n- 둘\n- 셋");
+    expect(applyMdAction("하나\n둘", 0, 4, "ol").text).toBe("1. 하나\n2. 둘");
+    // 기존 목록 마커는 교체
+    expect(applyMdAction("- 하나", 3, 3, "ol").text).toBe("1. 하나");
+  });
+
+  it("구분선: 현재 줄 뒤에 --- 삽입", () => {
+    expect(applyMdAction("문단", 1, 1, "hr").text).toBe("문단\n\n---\n");
+    expect(applyMdAction("", 0, 0, "hr").text).toBe("\n---\n");
   });
 });

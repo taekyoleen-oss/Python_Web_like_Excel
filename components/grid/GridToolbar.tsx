@@ -15,6 +15,7 @@ import {
   SortAscending,
   SortDescending,
   Stop,
+  TextB,
 } from "@phosphor-icons/react";
 import { startPasteFlow } from "@/components/grid/PasteImportDialog";
 import { Button } from "@/components/ui/button";
@@ -36,7 +37,7 @@ import {
 import { setCalcModeEverywhere } from "@/lib/grid/calc-host";
 import type { DateOrder } from "@/lib/grid/clipboard/infer";
 import { parseClipboard } from "@/lib/grid/clipboard/parse";
-import { useWorkbookStore, type CellEdit } from "@/lib/grid/model";
+import { isRangeBold, useWorkbookStore, type CellEdit } from "@/lib/grid/model";
 import {
   addBlockAtSelection,
   addMarkdownAtSelection,
@@ -255,6 +256,19 @@ export default function GridToolbar() {
   );
   const [pasteDialogOpen, setPasteDialogOpen] = useState(false);
   const calcMode = useWorkbookStore((s) => s.workbook.calcMode);
+  // 부록 J.2: 선택 전체가 굵으면 토글은 해제로 동작
+  const selectionBold = useWorkbookStore((s) => {
+    if (!s.selection) return false;
+    const sheet = s.workbook.sheets.find((sh) => sh.id === s.activeSheetId);
+    return sheet ? isRangeBold(sheet, s.selection) : false;
+  });
+  // 크기 표시는 활성 셀(선택 좌상단) 기준 — 엑셀과 동일
+  const selectionFs = useWorkbookStore((s) => {
+    const sel = s.selection;
+    const sheet = s.workbook.sheets.find((sh) => sh.id === s.activeSheetId);
+    const fs = sel && sheet ? sheet.cells[cellKey(sel.r0, sel.c0)]?.st?.fs : undefined;
+    return fs ? String(fs) : "default";
+  });
   const tocOpen = useWorkbookStore((s) => s.tocOpen);
   const aiChatOpen = useWorkbookStore((s) => s.aiChatOpen);
 
@@ -312,6 +326,37 @@ export default function GridToolbar() {
         onClick={() => sortByColumn(-1)}>
         <SortDescending />
       </ToolButton>
+      <Separator orientation="vertical" className="mx-1 h-5" />
+
+      {/* 부록 J.2 서식 그룹 — 굵게 토글 + 글자 크기 */}
+      <ToolButton
+        label={selectionBold ? "굵게 해제" : "굵게"}
+        disabled={!selection}
+        active={selectionBold}
+        onClick={() => selection && store().applyCellStyle(sid(), selection, { b: !selectionBold })}
+      >
+        <TextB weight="bold" />
+      </ToolButton>
+      <Select
+        value={selectionFs}
+        onValueChange={(v) =>
+          selection &&
+          store().applyCellStyle(sid(), selection, { fs: v === "default" ? null : Number(v) })
+        }
+        disabled={!selection}
+      >
+        <SelectTrigger className="h-7 w-20 text-xs" aria-label="글자 크기">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="default">기본</SelectItem>
+          {[12, 14, 16, 20].map((n) => (
+            <SelectItem key={n} value={String(n)}>
+              {n}px
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
       <Separator orientation="vertical" className="mx-1 h-5" />
 
       <ToolButton label="Python 블록 추가 (Ctrl+Shift+P)" onClick={addBlockAtSelection}>

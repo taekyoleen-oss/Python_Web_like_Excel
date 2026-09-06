@@ -217,6 +217,7 @@ export default function WorkbookShell() {
         if (settings?.bottomPanelHeight) setBottomHeight(settings.bottomPanelHeight);
         if (settings?.tocOpen) useWorkbookStore.getState().setTocOpen(true);
         if (settings?.aiChatOpen) useWorkbookStore.getState().setAiChatOpen(true);
+        if (settings?.showRefs === false) useWorkbookStore.getState().setShowRefs(false);
         if (settings?.view === "reference") useWorkbookStore.getState().setView("reference");
         const wb = settings?.lastWorkbookId
           ? await getWorkbook(settings.lastWorkbookId)

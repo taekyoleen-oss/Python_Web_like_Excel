@@ -179,6 +179,32 @@ export default function SheetGrid() {
     return out;
   }, [pyBlocks, sheet.id]);
 
+  // 부록 J.3: 성공 실행이 읽은 xl() 참조 범위 (teal tint, 토글 가능)
+  const executedRefs = useWorkbookStore((s) => s.executedRefs);
+  const showRefs = useWorkbookStore((s) => s.showRefs);
+  const refRanges = useMemo(() => {
+    if (!showRefs) return [];
+    const out: CellRange[] = [];
+    for (const ranges of Object.values(executedRefs)) {
+      for (const rg of ranges) if (rg.sheetId === sheet.id) out.push(rg);
+    }
+    return out;
+  }, [executedRefs, showRefs, sheet.id]);
+
+  // drawCell만 바뀌면 glide가 다시 그리지 않는다 — 참조 tint 영역(이전+현재)을 직접 damage
+  const prevRefRanges = useRef<CellRange[]>([]);
+  useEffect(() => {
+    const cells: { cell: Item }[] = [];
+    for (const rg of [...prevRefRanges.current, ...refRanges]) {
+      for (let r = rg.r0; r <= rg.r1 && cells.length < 20_000; r++) {
+        for (let c = rg.c0; c <= rg.c1; c++) cells.push({ cell: [c, r] });
+      }
+    }
+    // ponytail: 20k 셀 상한 — 초대형 참조는 스크롤 시 자연 리페인트로 마저 그린다
+    prevRefRanges.current = refRanges;
+    if (cells.length > 0) editorRef.current?.updateCells(cells);
+  }, [refRanges]);
+
   const flashRange = flash && flash.sheetId === sheet.id ? flash.range : null;
   const hoverRange = useWorkbookStore((s) => s.hoverRange);
   const editorHover = hoverRange && hoverRange.sheetId === sheet.id ? hoverRange.range : null;
@@ -255,12 +281,19 @@ export default function SheetGrid() {
       }
       const contentAlign =
         cell.t === "n" ? "right" : cell.t === "b" || cell.t === "d" ? "center" : "left";
-      const themeOverride: Partial<Theme> | undefined =
+      let themeOverride: Partial<Theme> | undefined =
         cell.t === "e"
           ? { textDark: DESTRUCTIVE }
           : locked
             ? { bgCell: "#EAF3FA" }
             : undefined;
+      // 부록 J.2: 셀 서식 (굵게·크기) — 폰트 패밀리는 theme이 유지
+      if (cell.st) {
+        themeOverride = {
+          ...themeOverride,
+          baseFontStyle: `${cell.st.b ? "bold " : ""}${cell.st.fs ?? 13}px`,
+        };
+      }
       return {
         kind: GridCellKind.Text,
         // 수식 셀은 편집 시드가 수식 원문 (부록 I.3 — 편집 재진입 시 원문 표시)
@@ -340,6 +373,36 @@ export default function SheetGrid() {
         ctx.restore();
       }
 
+      // 부록 J.3: 실행 참조 tint — teal 배경 + 범위 가장자리 얇은 점선 (spill Sky Blue와 구별)
+      for (const rg of refRanges) {
+        if (!inRange(rg, row, col)) continue;
+        ctx.save();
+        ctx.fillStyle = "rgba(31, 110, 100, 0.08)"; // --chip-teal-fg 8%
+        ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
+        ctx.strokeStyle = "#1F6E64";
+        ctx.lineWidth = 1;
+        ctx.setLineDash([3, 3]);
+        ctx.beginPath();
+        if (row === rg.r0) {
+          ctx.moveTo(rect.x, rect.y + 0.5);
+          ctx.lineTo(rect.x + rect.width, rect.y + 0.5);
+        }
+        if (row === rg.r1) {
+          ctx.moveTo(rect.x, rect.y + rect.height - 0.5);
+          ctx.lineTo(rect.x + rect.width, rect.y + rect.height - 0.5);
+        }
+        if (col === rg.c0) {
+          ctx.moveTo(rect.x + 0.5, rect.y);
+          ctx.lineTo(rect.x + 0.5, rect.y + rect.height);
+        }
+        if (col === rg.c1) {
+          ctx.moveTo(rect.x + rect.width - 0.5, rect.y);
+          ctx.lineTo(rect.x + rect.width - 0.5, rect.y + rect.height);
+        }
+        ctx.stroke();
+        ctx.restore();
+      }
+
       // 성공 플래시 (400ms)
       if (flashRange && inRange(flashRange, row, col)) {
         ctx.save();
@@ -395,7 +458,7 @@ export default function SheetGrid() {
         ctx.restore();
       }
     },
-    [anchorMap, sheet.cells, spillRanges, flashRange, editorHover, runningBlocks],
+    [anchorMap, sheet.cells, spillRanges, refRanges, flashRange, editorHover, runningBlocks],
   );
 
   const onCellEdited = useCallback(

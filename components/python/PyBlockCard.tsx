@@ -4,7 +4,7 @@
 // 헤더에는 접기·앵커·제목·상태만 남기고 보조 조작은 ⋮ 메뉴로 모은다.
 // kind==='markdown'이면 실행 UI 없이 마크다운 편집/미리보기만 (셀에 아무것도 쓰지 않는다).
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -51,7 +51,8 @@ import CodeEditor from "@/components/python/CodeEditor";
 import { formatA1 } from "@/lib/grid/a1";
 import { notifyWorkbookEdit } from "@/lib/grid/calc-host";
 import { codeTitle } from "@/lib/grid/code-sections";
-import { renderMarkdown } from "@/lib/grid/markdown";
+import { toast } from "sonner";
+import { applyMdAction, renderMarkdown, type MdAction } from "@/lib/grid/markdown";
 import { useWorkbookStore } from "@/lib/grid/model";
 import { outputsOf } from "@/lib/grid/outputs";
 import { moveBlock, runBlock } from "@/lib/grid/run-block";
@@ -447,6 +448,47 @@ function MoreMenu({ block, onRun }: { block: PyBlock; onRun: () => void }) {
   );
 }
 
+// ── 부록 J.1: 마크다운 이미지 내장 (data URI, 500KB 초과 시 캔버스 축소) ──
+
+const MAX_IMG_BYTES = 500 * 1024;
+const dataUriBytes = (uri: string): number =>
+  Math.ceil(((uri.length - uri.indexOf(",") - 1) * 3) / 4);
+
+async function imageFileToDataUri(file: File): Promise<string> {
+  if (file.size <= MAX_IMG_BYTES) {
+    return await new Promise<string>((res, rej) => {
+      const r = new FileReader();
+      r.onload = () => res(r.result as string);
+      r.onerror = () => rej(new Error("read"));
+      r.readAsDataURL(file);
+    });
+  }
+  // 캔버스 리사이즈 → JPEG, 500KB 이하가 될 때까지 단계 축소
+  const bmp = await createImageBitmap(file);
+  for (let scale = 1; scale >= 0.1; scale *= 0.7) {
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(bmp.width * scale));
+    canvas.height = Math.max(1, Math.round(bmp.height * scale));
+    canvas.getContext("2d")!.drawImage(bmp, 0, 0, canvas.width, canvas.height);
+    const uri = canvas.toDataURL("image/jpeg", 0.82);
+    if (dataUriBytes(uri) <= MAX_IMG_BYTES) return uri;
+  }
+  throw new Error("too-large");
+}
+
+/** J.1 서식 툴바 버튼 정의 — 라벨은 한국어, 표시는 축약 기호 */
+const MD_TOOLS: [MdAction, string, ReactNode][] = [
+  ["h1", "제목1", "H1"],
+  ["h2", "제목2", "H2"],
+  ["h3", "제목3", "H3"],
+  ["subheading", "하위 제목", "H+"],
+  ["bold", "굵게", <b key="b">B</b>],
+  ["ul", "기호 목록", "•―"],
+  ["ol", "번호 목록", "1."],
+  ["code", "인라인 코드", "<>"],
+  ["hr", "구분선", "—"],
+];
+
 export default function PyBlockCard({
   block,
   isFirst,
@@ -531,6 +573,43 @@ export default function PyBlockCard({
   const rendered = useMemo(
     () => (isMarkdown ? renderMarkdown(block.markdown ?? "") : null),
     [isMarkdown, block.markdown],
+  );
+
+  /** J.1 서식 툴바 — textarea 선택 기준으로 문법 삽입/감싸기 (undo는 코드 커밋과 동일 1회) */
+  const mdAction = (action: MdAction) => {
+    const ta = mdRef.current;
+    if (!ta) return;
+    const res = applyMdAction(ta.value, ta.selectionStart, ta.selectionEnd, action);
+    store().setBlockMarkdown(block.id, res.text);
+    requestAnimationFrame(() => {
+      ta.focus();
+      ta.setSelectionRange(res.start, res.end);
+    });
+  };
+
+  /** J.1 이미지 → data URI → 커서 위치에 ![이름](…) 삽입 */
+  const insertImage = useCallback(
+    async (file: File) => {
+      const big = file.size > MAX_IMG_BYTES;
+      if (big) toast.loading("이미지를 500KB 이하로 줄이는 중…", { id: "md-img" });
+      try {
+        const uri = await imageFileToDataUri(file);
+        const cur =
+          useWorkbookStore.getState().workbook.pyBlocks.find((b) => b.id === block.id)
+            ?.markdown ?? "";
+        const pos = mdRef.current?.selectionStart ?? cur.length;
+        store().setBlockMarkdown(
+          block.id,
+          `${cur.slice(0, pos)}![${file.name}](${uri})${cur.slice(pos)}`,
+        );
+        if (big) toast.success("이미지를 넣었습니다 (축소됨)", { id: "md-img" });
+      } catch {
+        toast.error("이미지를 넣지 못했습니다 — 500KB 이하로 줄일 수 없습니다", {
+          id: "md-img",
+        });
+      }
+    },
+    [block.id],
   );
 
   // 제목 폴백 (부록 F.3) — 표시 전용, 스토어에 쓰지 않는다
@@ -680,16 +759,64 @@ export default function PyBlockCard({
           <div className="min-w-0 flex-1 border-l">
             {isMarkdown ? (
               editingMd ? (
-                <textarea
-                  ref={mdRef}
-                  value={block.markdown ?? ""}
-                  onChange={(e) => store().setBlockMarkdown(block.id, e.target.value)}
-                  onBlur={() => setEditingMd(false)}
-                  rows={6}
-                  placeholder={"# 제목\n\n설명을 적으세요. **굵게**, `코드`, [링크](https://example.com)"}
-                  aria-label="마크다운"
-                  className="w-full resize-y bg-card p-2 font-mono text-xs outline-none placeholder:text-muted-foreground"
-                />
+                <>
+                  {/* J.1 서식 툴바 — mousedown preventDefault로 textarea blur(→미리보기 전환) 방지 */}
+                  <div
+                    data-testid="md-toolbar"
+                    className="flex flex-wrap items-center gap-0.5 border-b bg-muted/30 px-1 py-0.5"
+                  >
+                    {MD_TOOLS.map(([action, label, glyph]) => (
+                      <button
+                        key={action}
+                        type="button"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => mdAction(action)}
+                        aria-label={label}
+                        title={label}
+                        className="min-w-6 rounded px-1.5 py-0.5 font-mono text-[11px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
+                      >
+                        {glyph}
+                      </button>
+                    ))}
+                  </div>
+                  <textarea
+                    ref={mdRef}
+                    value={block.markdown ?? ""}
+                    onChange={(e) => store().setBlockMarkdown(block.id, e.target.value)}
+                    onBlur={() => setEditingMd(false)}
+                    onPaste={(e) => {
+                      const file = Array.from(e.clipboardData.files).find((f) =>
+                        f.type.startsWith("image/"),
+                      );
+                      if (file) {
+                        e.preventDefault();
+                        void insertImage(file);
+                      }
+                    }}
+                    onDragOver={(e) => {
+                      if (e.dataTransfer.types.includes("Files")) {
+                        e.preventDefault();
+                        e.stopPropagation(); // 워크북 교체 DnD와 분리
+                      }
+                    }}
+                    onDrop={(e) => {
+                      const file = Array.from(e.dataTransfer.files).find((f) =>
+                        f.type.startsWith("image/"),
+                      );
+                      if (file) {
+                        e.preventDefault();
+                        e.stopPropagation(); // 워크북 교체 DnD와 분리
+                        void insertImage(file);
+                      }
+                    }}
+                    rows={6}
+                    placeholder={
+                      "# 제목\n\n설명을 적으세요. **굵게**, `코드`, [링크](https://example.com)\n이미지는 드래그 앤 드롭 또는 붙여넣기"
+                    }
+                    aria-label="마크다운"
+                    className="w-full resize-y bg-card p-2 font-mono text-xs outline-none placeholder:text-muted-foreground"
+                  />
+                </>
               ) : (
                 <div
                   onDoubleClick={() => setEditingMd(true)}

@@ -21,9 +21,14 @@ const cellAt = (page: Page, key: string) =>
     key,
   );
 
-/** 셀에 텍스트 입력 → 오버레이 값 확인 후 Enter (grid-perf 타이핑 버퍼 패턴과 동일) */
+/** 셀에 텍스트 입력: 첫 키로 오버레이를 열고 포커스를 기다린 뒤 나머지 입력 → 값 확인 → Enter */
 async function typeAndCommit(page: Page, text: string) {
-  await page.keyboard.type(text);
+  await page.keyboard.type(text[0]);
+  await page.waitForFunction(() => {
+    const ta = document.getElementById("portal")?.querySelector("textarea, input");
+    return !!ta && document.activeElement === ta;
+  });
+  await page.keyboard.type(text.slice(1));
   await expect
     .poll(
       () =>

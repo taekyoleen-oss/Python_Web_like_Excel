@@ -110,6 +110,7 @@ function applyBlockFailure(
       last,
     })),
   );
+  st.setExecutedRefs(blockId, null); // 부록 J.3: 실패한 실행의 참조 표시는 지운다
 }
 
 export const calcHost: CalcHost = {
@@ -341,6 +342,16 @@ export const calcHost: CalcHost = {
         }
       }
       st.applyOutputResults(blockId, applies);
+      // 부록 J.3: 이 실행이 읽은 xl() 참조를 그리드 표시용으로 기록 (분석 캐시 재사용 — 값싸다)
+      void analyzedRefs(block.code).then((refs) => {
+        const now = getState();
+        if (!now.workbook.pyBlocks.some((b) => b.id === blockId)) return;
+        try {
+          now.setExecutedRefs(blockId, resolveRefs(refs, block.sheetId, resolveSheetName));
+        } catch {
+          now.setExecutedRefs(blockId, null);
+        }
+      });
       if (flash) {
         st.setFlash(flash);
         setTimeout(() => getState().setFlash(null), 400);

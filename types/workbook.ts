@@ -17,6 +17,11 @@ export interface Cell {
    * (`t:'n'` 숫자 또는 `t:'e'` + 오류 코드). 선택 필드라 기존 워크북 호환.
    */
   fx?: string;
+  /**
+   * 셀 서식 (부록 J.2): b=굵게, fs=글자 크기(px). 선택 필드 — 기존 워크북 호환.
+   * .pygrid.json에만 보존 (TSV/HTML 복사·XLSX 내보내기는 값만).
+   */
+  st?: { b?: boolean; fs?: number };
 }
 
 export interface Sheet {
