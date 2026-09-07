@@ -36,6 +36,7 @@ function sampleWorkbook(): Workbook {
       outputMode: "object",
       includeIndex: "always",
       title: "생명표 요약",
+      note: "## 배경\n설명 텍스트 **굵게**", // 부록 J.4 — 코드 블록 설명
       collapsed: true,
       output: { variable: "df", columns: ["a", "b"], rowLimit: 5 },
       last: {
@@ -191,6 +192,7 @@ describe("workbook-json", () => {
     expect(restored.version).toBe(1);
     expect(restored.pyBlocks[0]).toMatchObject({
       title: "생명표 요약",
+      note: "## 배경\n설명 텍스트 **굵게**", // 부록 J.4 왕복 보존
       collapsed: true,
       output: { variable: "df", columns: ["a", "b"], rowLimit: 5 },
     });

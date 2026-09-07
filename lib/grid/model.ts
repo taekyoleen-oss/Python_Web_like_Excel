@@ -279,6 +279,8 @@ export interface WorkbookState {
   /** 이미지 blob 사후 패치 — 비동기 저장 완료 후 last.imageBlobId만 갱신 (히스토리 무관) */
   patchOutputImage: (blockId: string, outputId: string, imageBlobId: string) => void;
   setBlockMarkdown: (id: string, markdown: string) => void;
+  /** 부록 J.4: 코드 블록 설명. null이면 필드 삭제(영역 소멸). 마크다운 블록엔 불가 */
+  setBlockNote: (id: string, note: string | null) => void;
   setBlockTitle: (id: string, title: string) => void;
   setBlockCollapsed: (id: string, collapsed: boolean) => void;
   /** 패널 헤더 '모두 접기/펼치기' */
@@ -926,6 +928,14 @@ export const createWorkbookStore = () => {
               if (!block || block.markdown === markdown) return;
               block.markdown = markdown;
               block.title = markdownTitle(markdown) || undefined; // 첫 헤딩 = 목차 제목
+            }),
+
+          setBlockNote: (id, note) =>
+            set((state) => {
+              const block = state.workbook.pyBlocks.find((b) => b.id === id);
+              if (!block || block.kind === "markdown") return;
+              if (note === null) delete block.note;
+              else if (block.note !== note) block.note = note;
             }),
 
           setBlockTitle: (id, title) =>

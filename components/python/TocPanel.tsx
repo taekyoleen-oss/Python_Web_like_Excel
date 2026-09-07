@@ -13,8 +13,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { editorRegistry } from "@/components/python/CodeEditor";
-import { codeSections, type CodeSection } from "@/lib/grid/code-sections";
-import { buildToc, type TocEntry } from "@/lib/grid/markdown";
+import { blockSubEntries, buildToc, type SubEntry, type TocEntry } from "@/lib/grid/markdown";
 import { useWorkbookStore } from "@/lib/grid/model";
 import { blocksInOrder, runBlocks } from "@/lib/grid/run-block";
 import { cn } from "@/lib/utils";
@@ -87,10 +86,10 @@ export function TocList() {
   const workbook = useWorkbookStore((s) => s.workbook);
   const blocks = useMemo(() => blocksInOrder(workbook), [workbook]);
   const toc = useMemo(() => buildToc(blocks), [blocks]);
-  // 코드 블록의 섹션 주석 → 서브 항목 (부록 F.2)
+  // 코드 블록 서브 항목 = 설명(note) 헤딩 + 섹션 주석 (부록 F.2 + J.4)
   const sections = useMemo(() => {
-    const m = new Map<string, CodeSection[]>();
-    for (const b of blocks) if (b.kind !== "markdown") m.set(b.id, codeSections(b.code));
+    const m = new Map<string, SubEntry[]>();
+    for (const b of blocks) if (b.kind !== "markdown") m.set(b.id, blockSubEntries(b));
     return m;
   }, [blocks]);
   // 현재 항목: 최근 선택한 블록 → 없으면 마지막으로 편집한 블록 (한 블록의 첫 항목만 강조)
@@ -165,22 +164,26 @@ export function TocList() {
               </DropdownMenu>
             </div>
           </li>
-          {/* 코드 섹션 주석 → 한 단계 안쪽 서브 항목 (부록 F.2) */}
+          {/* 서브 항목: 설명(note) 헤딩 먼저 + 코드 섹션 주석 (부록 F.2 + J.4) */}
           {entry.kind === "code" &&
-            (sections.get(entry.blockId) ?? []).map((s) => (
+            (sections.get(entry.blockId) ?? []).map((s, j) => (
               <li
-                key={`${entry.key}:s${s.line}`}
+                key={`${entry.key}:s${j}`}
                 className="flex items-center border-l-2 border-transparent pr-1"
                 data-testid="toc-section"
               >
                 <button
-                  onClick={() => goToSection(entry.blockId, s.line)}
-                  aria-label={s.title}
-                  style={{ paddingLeft: `${entry.level * 12 + 6}px` }}
+                  onClick={() =>
+                    s.line === undefined
+                      ? goToBlock(entry.blockId) // note 헤딩 — 카드 포커스로 충분
+                      : goToSection(entry.blockId, s.line)
+                  }
+                  aria-label={s.label}
+                  style={{ paddingLeft: `${(entry.level - 1 + s.depth) * 12 + 6}px` }}
                   className="flex min-w-0 flex-1 items-center gap-1.5 rounded py-0.5 text-left text-xs text-muted-foreground hover:bg-accent"
                 >
                   <span className="shrink-0">·</span>
-                  <span className="truncate">{s.title}</span>
+                  <span className="truncate">{s.label}</span>
                 </button>
               </li>
             ))}

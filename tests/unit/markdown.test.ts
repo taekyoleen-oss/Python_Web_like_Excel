@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { isValidElement, type ReactNode } from "react";
 import {
   applyMdAction,
+  blockSubEntries,
   buildToc,
   markdownHeadings,
   markdownTitle,
@@ -312,5 +313,40 @@ describe("applyMdAction (부록 J.1 서식 툴바)", () => {
   it("구분선: 현재 줄 뒤에 --- 삽입", () => {
     expect(applyMdAction("문단", 1, 1, "hr").text).toBe("문단\n\n---\n");
     expect(applyMdAction("", 0, 0, "hr").text).toBe("\n---\n");
+  });
+});
+
+describe("부록 J.4 — note 하위 제목·목차 서브 병합", () => {
+  it("applyMdAction subheading baseLevel=1: note 최상위는 ##", () => {
+    expect(applyMdAction("설명뿐", 1, 1, "subheading", 1).text).toBe("설명뿐\n## ");
+    // 헤딩이 이미 있으면 그 기준 +1 (최하 ###)
+    expect(applyMdAction("## 배경\n글", 8, 8, "subheading", 1).text).toBe("## 배경\n글\n### ");
+    expect(applyMdAction("### 깊음", 7, 7, "subheading", 1).text).toBe("### 깊음\n### ");
+    // 기본(baseLevel=0)은 기존 동작: 없으면 #
+    expect(applyMdAction("본문", 1, 1, "subheading").text).toBe("본문\n# ");
+  });
+
+  it("blockSubEntries: note 헤딩(##→1단계·###→2단계) 먼저, 코드 섹션 다음", () => {
+    const block = {
+      id: "b",
+      sheetId: "s",
+      anchor: { r: 0, c: 0 },
+      code: "# ── 데이터 로드 ──\nx = 1\n\n# 검증\ny = 2",
+      outputMode: "values",
+      includeIndex: "auto",
+      note: "## 배경\n설명\n### 상세",
+    } as PyBlock;
+    expect(blockSubEntries(block)).toEqual([
+      { label: "배경", depth: 1 },
+      { label: "상세", depth: 2 },
+      { label: "데이터 로드", depth: 1, line: 0 },
+      { label: "검증", depth: 1, line: 3 },
+    ]);
+    // note 없음 → 코드 섹션만, 마크다운 블록 → 빈 배열
+    expect(blockSubEntries({ ...block, note: undefined }).map((s) => s.label)).toEqual([
+      "데이터 로드",
+      "검증",
+    ]);
+    expect(blockSubEntries({ ...block, kind: "markdown" })).toEqual([]);
   });
 });

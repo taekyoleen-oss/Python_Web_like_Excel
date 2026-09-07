@@ -394,7 +394,18 @@ function goToAnchor(block: PyBlock): void {
 }
 
 /** ⋮ 더보기 — 헤더에서 밀어낸 보조 조작 */
-function MoreMenu({ block, onRun }: { block: PyBlock; onRun: () => void }) {
+function MoreMenu({
+  block,
+  onRun,
+  onNote,
+}: {
+  block: PyBlock;
+  onRun: () => void;
+  /** 부록 J.4: 설명 추가/편집 (코드 블록만) */
+  onNote?: () => void;
+}) {
+  // 설명 추가/편집 선택 시 Radix가 트리거로 포커스를 되돌리면 방금 연 편집기가 blur로 닫힌다 — 억제
+  const suppressRestore = useRef(false);
   const isMarkdown = block.kind === "markdown";
   const collapsed = !!block.collapsed;
   const firstOutputId = block.outputs?.[0]?.id;
@@ -406,7 +417,16 @@ function MoreMenu({ block, onRun }: { block: PyBlock; onRun: () => void }) {
           <DotsThreeVertical weight="bold" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="min-w-44">
+      <DropdownMenuContent
+        align="end"
+        className="min-w-44"
+        onCloseAutoFocus={(e) => {
+          if (suppressRestore.current) {
+            e.preventDefault();
+            suppressRestore.current = false;
+          }
+        }}
+      >
         {!isMarkdown && (
           <>
             <DropdownMenuItem onClick={onRun}>
@@ -435,6 +455,17 @@ function MoreMenu({ block, onRun }: { block: PyBlock; onRun: () => void }) {
           >
             {isMarkdown ? "위치 지정" : "출력 위치 지정 (첫 출력)"}
             {picking && <DropdownMenuShortcut>지정 중</DropdownMenuShortcut>}
+          </DropdownMenuItem>
+        )}
+        {!isMarkdown && onNote && (
+          <DropdownMenuItem
+            onClick={() => {
+              suppressRestore.current = true;
+              onNote();
+            }}
+          >
+            {block.note === undefined ? "설명 추가" : "설명 편집"}
+            <DropdownMenuShortcut>제목에서 Ctrl+Enter</DropdownMenuShortcut>
           </DropdownMenuItem>
         )}
         <DropdownMenuItem onClick={() => goToAnchor(block)}>앵커 셀로 이동</DropdownMenuItem>
@@ -489,6 +520,9 @@ const MD_TOOLS: [MdAction, string, ReactNode][] = [
   ["hr", "구분선", "—"],
 ];
 
+/** J.4 설명 전용 툴바 — 제목1/2/3 없음 (블록 제목이 사실상 #, 하위 제목이 ##부터 삽입) */
+const NOTE_TOOLS = MD_TOOLS.filter(([a]) => a !== "h1" && a !== "h2" && a !== "h3");
+
 export default function PyBlockCard({
   block,
   isFirst,
@@ -511,6 +545,9 @@ export default function PyBlockCard({
   const collapsed = !!block.collapsed;
   const cardRef = useRef<HTMLDivElement>(null);
   const mdRef = useRef<HTMLTextAreaElement>(null);
+  const noteRef = useRef<HTMLTextAreaElement>(null);
+  // J.4: 설명(note) 편집/미리보기 — 마크다운 본문과 동일 패턴
+  const [editingNote, setEditingNote] = useState(false);
   const codeRef = useRef(block.code);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   // 노트북처럼: 새 마크다운은 편집 상태로 열리고, 미리보기 더블클릭으로 다시 편집
@@ -574,34 +611,51 @@ export default function PyBlockCard({
     () => (isMarkdown ? renderMarkdown(block.markdown ?? "") : null),
     [isMarkdown, block.markdown],
   );
+  // J.4: 설명(note) 미리보기 — 마크다운 본문과 동일 렌더러
+  const renderedNote = useMemo(
+    () => (!isMarkdown && block.note?.trim() ? renderMarkdown(block.note) : null),
+    [isMarkdown, block.note],
+  );
 
-  /** J.1 서식 툴바 — textarea 선택 기준으로 문법 삽입/감싸기 (undo는 코드 커밋과 동일 1회) */
-  const mdAction = (action: MdAction) => {
-    const ta = mdRef.current;
+  // 편집 대상 필드 — 마크다운 본문 또는 코드 블록 설명(note, 부록 J.4)
+  const fieldRef = (field: "markdown" | "note") =>
+    field === "markdown" ? mdRef.current : noteRef.current;
+  const fieldSet = (field: "markdown" | "note", value: string) => {
+    if (field === "markdown") store().setBlockMarkdown(block.id, value);
+    else store().setBlockNote(block.id, value);
+  };
+
+  /** J.1 서식 툴바 — textarea 선택 기준으로 문법 삽입/감싸기 (undo는 코드 커밋과 동일 1회).
+   *  note는 baseLevel 1: 하위 제목이 ##부터 (블록 제목이 사실상 #, 부록 J.4) */
+  const applyTool = (action: MdAction, field: "markdown" | "note") => {
+    const ta = fieldRef(field);
     if (!ta) return;
-    const res = applyMdAction(ta.value, ta.selectionStart, ta.selectionEnd, action);
-    store().setBlockMarkdown(block.id, res.text);
+    const res = applyMdAction(
+      ta.value,
+      ta.selectionStart,
+      ta.selectionEnd,
+      action,
+      field === "note" ? 1 : 0,
+    );
+    fieldSet(field, res.text);
     requestAnimationFrame(() => {
       ta.focus();
       ta.setSelectionRange(res.start, res.end);
     });
   };
 
-  /** J.1 이미지 → data URI → 커서 위치에 ![이름](…) 삽입 */
+  /** J.1 이미지 → data URI → 커서 위치에 ![이름](…) 삽입 (본문·설명 공용) */
   const insertImage = useCallback(
-    async (file: File) => {
+    async (file: File, field: "markdown" | "note") => {
       const big = file.size > MAX_IMG_BYTES;
       if (big) toast.loading("이미지를 500KB 이하로 줄이는 중…", { id: "md-img" });
       try {
         const uri = await imageFileToDataUri(file);
-        const cur =
-          useWorkbookStore.getState().workbook.pyBlocks.find((b) => b.id === block.id)
-            ?.markdown ?? "";
-        const pos = mdRef.current?.selectionStart ?? cur.length;
-        store().setBlockMarkdown(
-          block.id,
-          `${cur.slice(0, pos)}![${file.name}](${uri})${cur.slice(pos)}`,
-        );
+        const b = useWorkbookStore.getState().workbook.pyBlocks.find((x) => x.id === block.id);
+        const cur = (field === "markdown" ? b?.markdown : b?.note) ?? "";
+        const ta = field === "markdown" ? mdRef.current : noteRef.current;
+        const pos = ta?.selectionStart ?? cur.length;
+        fieldSet(field, `${cur.slice(0, pos)}![${file.name}](${uri})${cur.slice(pos)}`);
         if (big) toast.success("이미지를 넣었습니다 (축소됨)", { id: "md-img" });
       } catch {
         toast.error("이미지를 넣지 못했습니다 — 500KB 이하로 줄일 수 없습니다", {
@@ -609,8 +663,44 @@ export default function PyBlockCard({
         });
       }
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [block.id],
   );
+
+  /** 이미지 붙여넣기·드롭 핸들러 (본문·설명 공용) — 워크북 교체 DnD와 분리 */
+  const imageDndProps = (field: "markdown" | "note") => ({
+    onPaste: (e: React.ClipboardEvent) => {
+      const file = Array.from(e.clipboardData.files).find((f) => f.type.startsWith("image/"));
+      if (file) {
+        e.preventDefault();
+        void insertImage(file, field);
+      }
+    },
+    onDragOver: (e: React.DragEvent) => {
+      if (e.dataTransfer.types.includes("Files")) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    },
+    onDrop: (e: React.DragEvent) => {
+      const file = Array.from(e.dataTransfer.files).find((f) => f.type.startsWith("image/"));
+      if (file) {
+        e.preventDefault();
+        e.stopPropagation();
+        void insertImage(file, field);
+      }
+    },
+  });
+
+  /** J.4: 설명 영역 열기 — 없으면 빈 note 생성, 편집 모드 + 포커스 */
+  const openNote = () => {
+    if (collapsed) store().setBlockCollapsed(block.id, false);
+    const cur = useWorkbookStore.getState().workbook.pyBlocks.find((b) => b.id === block.id);
+    if (cur?.note === undefined) store().setBlockNote(block.id, "");
+    setEditingNote(true);
+    // 이중 rAF: Radix 메뉴가 닫히며 트리거로 포커스를 되돌린 뒤에 편집기로 포커스
+    requestAnimationFrame(() => requestAnimationFrame(() => noteRef.current?.focus()));
+  };
 
   // 제목 폴백 (부록 F.3) — 표시 전용, 스토어에 쓰지 않는다
   const fallbackTitle = useMemo(
@@ -651,6 +741,21 @@ export default function PyBlockCard({
             onChange={(e) => store().setBlockTitle(block.id, e.target.value)}
             // 제목이 비어 있으면 코드 첫 주석에서 유도한 표시 전용 제목 (저장 안 함)
             placeholder={fallbackTitle || "제목 없음"}
+            // J.4 추천 제목 채택: 비어 있고 폴백이 있으면 포커스 시 실제 값으로 시드 + 전체 선택
+            onFocus={(e) => {
+              if (!block.title && fallbackTitle) {
+                store().setBlockTitle(block.id, fallbackTitle);
+                const input = e.target;
+                requestAnimationFrame(() => input.select());
+              }
+            }}
+            // J.4: 제목에서 Ctrl+Enter → 설명(note) 편집으로
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+                e.preventDefault();
+                openNote();
+              }
+            }}
             aria-label="블록 제목"
             className="h-6 min-w-0 flex-1 px-1.5"
           />
@@ -716,7 +821,7 @@ export default function PyBlockCard({
         >
           <TrashSimple />
         </Button>
-        <MoreMenu block={block} onRun={run} />
+        <MoreMenu block={block} onRun={run} onNote={isMarkdown ? undefined : openNote} />
       </div>
         <button
           onClick={() => goToAnchor(block)}
@@ -769,7 +874,7 @@ export default function PyBlockCard({
                         key={action}
                         type="button"
                         onMouseDown={(e) => e.preventDefault()}
-                        onClick={() => mdAction(action)}
+                        onClick={() => applyTool(action, "markdown")}
                         aria-label={label}
                         title={label}
                         className="min-w-6 rounded px-1.5 py-0.5 font-mono text-[11px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
@@ -783,31 +888,7 @@ export default function PyBlockCard({
                     value={block.markdown ?? ""}
                     onChange={(e) => store().setBlockMarkdown(block.id, e.target.value)}
                     onBlur={() => setEditingMd(false)}
-                    onPaste={(e) => {
-                      const file = Array.from(e.clipboardData.files).find((f) =>
-                        f.type.startsWith("image/"),
-                      );
-                      if (file) {
-                        e.preventDefault();
-                        void insertImage(file);
-                      }
-                    }}
-                    onDragOver={(e) => {
-                      if (e.dataTransfer.types.includes("Files")) {
-                        e.preventDefault();
-                        e.stopPropagation(); // 워크북 교체 DnD와 분리
-                      }
-                    }}
-                    onDrop={(e) => {
-                      const file = Array.from(e.dataTransfer.files).find((f) =>
-                        f.type.startsWith("image/"),
-                      );
-                      if (file) {
-                        e.preventDefault();
-                        e.stopPropagation(); // 워크북 교체 DnD와 분리
-                        void insertImage(file);
-                      }
-                    }}
+                    {...imageDndProps("markdown")}
                     rows={6}
                     placeholder={
                       "# 제목\n\n설명을 적으세요. **굵게**, `코드`, [링크](https://example.com)\n이미지는 드래그 앤 드롭 또는 붙여넣기"
@@ -834,6 +915,73 @@ export default function PyBlockCard({
               )
             ) : (
               <>
+                {/* J.4 설명(note) — 헤더 아래·본문 위, 편집/미리보기. 없으면 영역 자체가 없다 */}
+                {block.note !== undefined && (
+                  <div className="border-b" data-testid="block-note">
+                    {editingNote ? (
+                      <>
+                        <div
+                          data-testid="note-toolbar"
+                          className="flex flex-wrap items-center gap-0.5 border-b bg-muted/30 px-1 py-0.5"
+                        >
+                          {NOTE_TOOLS.map(([action, label, glyph]) => (
+                            <button
+                              key={action}
+                              type="button"
+                              onMouseDown={(e) => e.preventDefault()} // blur(→미리보기) 방지
+                              onClick={() => applyTool(action, "note")}
+                              aria-label={label}
+                              title={label}
+                              className="min-w-6 rounded px-1.5 py-0.5 font-mono text-[11px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
+                            >
+                              {glyph}
+                            </button>
+                          ))}
+                          <button
+                            type="button"
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() => {
+                              store().setBlockNote(block.id, null); // 확인 없이 삭제, 1 undo
+                              setEditingNote(false);
+                            }}
+                            aria-label="설명 삭제"
+                            title="설명 삭제"
+                            className="ml-auto rounded px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-accent hover:text-destructive"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                        <textarea
+                          ref={noteRef}
+                          value={block.note}
+                          onChange={(e) => store().setBlockNote(block.id, e.target.value)}
+                          onBlur={() => setEditingNote(false)}
+                          {...imageDndProps("note")}
+                          rows={3}
+                          placeholder="블록 설명 (마크다운) — ## 헤딩은 목차 서브 항목이 됩니다"
+                          aria-label="설명"
+                          className="w-full resize-y bg-card p-2 font-mono text-xs outline-none placeholder:text-muted-foreground"
+                        />
+                      </>
+                    ) : (
+                      <div
+                        onDoubleClick={() => {
+                          setEditingNote(true);
+                          requestAnimationFrame(() => noteRef.current?.focus());
+                        }}
+                        data-testid="note-preview"
+                        className="space-y-1 px-2 py-1.5"
+                        title="더블클릭하여 편집"
+                      >
+                        {renderedNote ?? (
+                          <p className="text-xs text-muted-foreground">
+                            더블클릭하여 설명 입력
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
                 <OutputList block={block} />
                 {narrow ? (
                   <>

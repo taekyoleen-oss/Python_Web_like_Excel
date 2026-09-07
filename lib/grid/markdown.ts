@@ -7,7 +7,7 @@
 import { createElement, type ReactNode } from "react";
 import type { BlockKind, PyBlock, RunStatus } from "@/types/workbook";
 import { formatA1 } from "./a1";
-import { codeTitle } from "./code-sections";
+import { codeSections, codeTitle } from "./code-sections";
 
 export type Inline =
   | { t: "text"; v: string }
@@ -368,12 +368,14 @@ function prefixLines(
 /**
  * 마크다운 서식 액션 적용 (부록 J.1 툴바). 커서/선택 기준으로 문법을 삽입·감싼다.
  * subheading: 커서 위(포함)의 가장 가까운 헤딩보다 한 단계 깊은 헤딩 줄 삽입 (최하 ###).
+ * baseLevel: 헤딩이 없을 때 기준 레벨 — 코드 블록 설명은 1(블록 제목이 사실상 #이라 ##부터, 부록 J.4).
  */
 export function applyMdAction(
   text: string,
   start: number,
   end: number,
   action: MdAction,
+  baseLevel = 0,
 ): MdEditResult {
   const wrap = (mark: string): MdEditResult => {
     const sel = text.slice(start, end);
@@ -398,10 +400,10 @@ export function applyMdAction(
     case "h3":
       return heading(3);
     case "subheading": {
-      // 커서가 속한/위의 마지막 헤딩 레벨 + 1 (없으면 1, 최하 3)
+      // 커서가 속한/위의 마지막 헤딩 레벨 + 1 (없으면 baseLevel+1, 최하 3)
       const before = text.slice(0, lineEndAt(text, start));
       const levels = [...before.matchAll(/^(#{1,6})\s/gm)].map((m) => m[1].length);
-      const level = Math.min((levels[levels.length - 1] ?? 0) + 1, 3);
+      const level = Math.min((levels[levels.length - 1] ?? baseLevel) + 1, 3);
       const e = lineEndAt(text, start);
       const ins = `${e > 0 && text !== "" ? "\n" : ""}${"#".repeat(level)} `;
       const next = text.slice(0, e) + ins + text.slice(e);
@@ -438,6 +440,28 @@ export interface TocEntry {
 
 export const anchorLabel = (b: PyBlock): string =>
   formatA1({ r0: b.anchor.r, c0: b.anchor.c, r1: b.anchor.r, c1: b.anchor.c });
+
+/** 목차 서브 항목 (부록 F.2 + J.4) — 부모 코드 블록 항목 기준 추가 들여쓰기 단계 */
+export interface SubEntry {
+  label: string;
+  /** 1 = 한 단계 안 (## 헤딩·코드 섹션), 2 = 두 단계 (###) */
+  depth: number;
+  /** 코드 섹션이면 편집기 스크롤용 0-기반 줄 번호. note 헤딩은 없음(카드 포커스로 충분) */
+  line?: number;
+}
+
+/** 부록 J.4: 코드 블록 서브 항목 = note 헤딩(## → 1단계, ### → 2단계) 먼저, 코드 섹션 다음 */
+export function blockSubEntries(block: PyBlock): SubEntry[] {
+  if (block.kind === "markdown") return [];
+  const out: SubEntry[] = [];
+  if (block.note) {
+    for (const h of markdownHeadings(block.note)) {
+      out.push({ label: h.text || "(제목 없음)", depth: Math.min(Math.max(1, h.level - 1), 2) });
+    }
+  }
+  for (const s of codeSections(block.code)) out.push({ label: s.title, depth: 1, line: s.line });
+  return out;
+}
 
 /** 계산 순서로 정렬된 블록 → 목차. 코드 블록은 직전 마크다운 헤딩 아래 잎으로 들어간다 */
 export function buildToc(ordered: PyBlock[]): TocEntry[] {

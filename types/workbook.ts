@@ -110,6 +110,12 @@ export interface PyBlock {
   title?: string;
   /** kind==='markdown'일 때의 본문 */
   markdown?: string;
+  /**
+   * 코드 블록의 마크다운 설명 (부록 J.4). 헤더 아래 편집/미리보기 영역에 표시되고
+   * 헤딩은 목차 서브 항목으로 병합된다. undefined = 영역 없음, "" = 빈 설명(편집 중).
+   * 마크다운 블록에는 쓰지 않는다(본문이 곧 문서).
+   */
+  note?: string;
   /** 카드 접기 상태 (마크다운·코드·결과 전부 숨김) */
   collapsed?: boolean;
   /** 출력 선택 (변수·열·행) — 레거시 단일 출력. 로드 시 outputs[0]로 정규화된다 */
