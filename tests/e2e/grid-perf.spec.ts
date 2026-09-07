@@ -194,8 +194,10 @@ test("hover 셀 툴바가 카드 헤더(제목·상태 칩)를 덮지 않는다 
   await card.hover();
   const toolbar = page.getByTestId("cell-toolbar");
   await expect(toolbar).toBeVisible();
-  // 툴바 하단이 헤더 행(제목 입력)의 세로 중심보다 위 → 헤더 콘텐츠를 덮지 않는다
+  // 인라인 배치 — 카드 안에 있고(위 카드를 가리지 않음) 제목 입력과 수평으로 겹치지 않는다
   const tb = (await toolbar.boundingBox())!;
   const title = (await card.getByLabel("블록 제목").boundingBox())!;
-  expect(tb.y + tb.height).toBeLessThanOrEqual(title.y + title.height / 2);
+  const cardBox = (await card.boundingBox())!;
+  expect(tb.y).toBeGreaterThanOrEqual(cardBox.y); // 카드 밖(이전 카드 영역)으로 나가지 않는다
+  expect(tb.x).toBeGreaterThanOrEqual(title.x + title.width); // 제목을 덮지 않는다
 });

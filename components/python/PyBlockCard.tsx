@@ -669,21 +669,12 @@ export default function PyBlockCard({
             )}
           </>
         )}
-        <button
-          onClick={() => goToAnchor(block)}
-          className="shrink-0 font-mono text-xs text-foreground/80 hover:text-primary"
-          title="앵커 셀로 이동"
+        {/* 셀 툴바 — 헤더 행 안에 공간을 항상 예약(인라인)해 아무것도 가리지 않는다.
+            hover·포커스에서만 보이고, DOM에는 항상 있어 Tab으로 닿는다 */}
+        <div
+          data-testid="cell-toolbar"
+          className="pointer-events-none flex shrink-0 items-center rounded border bg-card p-0.5 opacity-0 transition-opacity group-focus-within:pointer-events-auto group-focus-within:opacity-100 group-hover:pointer-events-auto group-hover:opacity-100"
         >
-          {anchorLabel}
-        </button>
-      </div>
-
-      {/* 떠 있는 셀 툴바 — hover·포커스에서만 보이지만 DOM에는 항상 있어 Tab으로 닿는다.
-          카드 상단 테두리에 걸치게 띄워(Colab 방식) 제목·상태 칩을 덮지 않는다 (QA 권고) */}
-      <div
-        data-testid="cell-toolbar"
-        className="pointer-events-none absolute -top-4 right-2 z-10 flex items-center rounded border bg-card p-0.5 opacity-0 shadow-sm transition-opacity group-focus-within:pointer-events-auto group-focus-within:opacity-100 group-hover:pointer-events-auto group-hover:opacity-100"
-      >
         <Button
           variant="ghost"
           size="icon-xs"
@@ -726,6 +717,14 @@ export default function PyBlockCard({
           <TrashSimple />
         </Button>
         <MoreMenu block={block} onRun={run} />
+      </div>
+        <button
+          onClick={() => goToAnchor(block)}
+          className="shrink-0 font-mono text-xs text-foreground/80 hover:text-primary"
+          title="앵커 셀로 이동"
+        >
+          {anchorLabel}
+        </button>
       </div>
 
       {/* 본문 — 왼쪽 원형 실행 레일 + 내용 */}
