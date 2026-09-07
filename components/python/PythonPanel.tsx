@@ -70,7 +70,7 @@ export default function PythonPanel() {
         <AiGenerateBar />
       </div>
 
-      <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-2">
+      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-2">
         {blocks.length === 0 ? (
           <p className="px-2 py-8 text-center text-xs text-muted-foreground">
             셀을 선택하고 ＋ Python 블록을 누르세요

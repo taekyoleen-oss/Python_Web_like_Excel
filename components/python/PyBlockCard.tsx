@@ -354,7 +354,8 @@ function OutputRow({
 function OutputList({ block }: { block: PyBlock }) {
   const outputs = outputsOf(block);
   return (
-    <div data-testid="output-list">
+    // 카드 내부 밴드 구분: 출력 설정은 옅은 muted 배경 + 상하 경계 (설명·코드와 시각 분리)
+    <div data-testid="output-list" className="border-y bg-muted/25">
       {outputs.map((o, i) => (
         <OutputRow
           key={o.id}
@@ -712,16 +713,21 @@ export default function PyBlockCard({
     <div
       ref={cardRef}
       className={cn(
-        "group relative rounded border bg-card transition-shadow",
+        // 한 묶음(제목·설명·코드·출력)이 하나의 카드로 읽히도록: 라운드 클리핑 + 좌측 종류 바.
+        // 코드 블록은 Sky Blue(파이썬 관여), 마크다운은 중립 회색 — 이웃 카드와 시각적으로 분리된다.
+        "group relative overflow-hidden rounded-md border bg-card shadow-sm transition-shadow",
+        "border-l-[3px]",
+        isMarkdown ? "border-l-muted-foreground/35" : "border-l-primary/70",
         hovered && "border-primary/60 shadow-[0_0_0_2px_#EAF3FA]", // spill hover → 카드 강조 (§4.8)
         picking && "border-primary",
+        focusRequested && "ring-1 ring-primary/40", // 목차·이동으로 지목된 블록
       )}
       data-block-id={block.id}
       data-block-kind={isMarkdown ? "markdown" : "code"}
     >
       {/* 헤더 (부록 F.3) — [접기][제목 맨 앞][상태·dirty·마크다운][앵커 주소 맨 뒤].
           접기 시에도 이 줄은 통째로 남는다 — 숨는 것은 아래 본문뿐 */}
-      <div className="flex items-center gap-1.5 border-b bg-muted/40 px-2 py-1">
+      <div className="flex items-center gap-1.5 border-b bg-muted/60 px-2 py-1">
         <button
           onClick={() => store().setBlockCollapsed(block.id, !collapsed)}
           className="text-muted-foreground hover:text-foreground"
