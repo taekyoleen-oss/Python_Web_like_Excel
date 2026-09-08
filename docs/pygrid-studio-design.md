@@ -843,3 +843,30 @@ PyBlock.outputs?: OutputBinding[]   // 정본. 레거시 단일 필드는 output
 - **서식 메뉴(설명 전용)**: 제목1 없이 **하위 제목**(블록 제목보다 한 단계 아래 ##부터)·굵게·목록·인라인 코드·구분선만.
 - **목차 연동**: 설명 속 헤딩도 해당 블록의 서브 항목으로 표시(코드 섹션 서브 항목과 병합, 클릭 시 블록 포커스).
 - 저장: .pygrid.json 왕복 보존. 히스토리: 타이핑은 기존 제목/마크다운과 동일한 커밋 정책.
+
+---
+
+## 부록 K. v1.9 — 계리 예제 데이터 내장 워크북 (2026-09-07)
+
+앱 이름/웹 주소는 `sheet_python`(package.json name·GitHub 리포). 내부 식별자·`.pygrid.json` 확장자는 유지.
+
+### K.1 목적
+
+`Actuarial_Platform`의 예제 데이터 5종을 **데이터와 파이썬이 한 파일로 묶인 예제 워크북**으로 제공한다 — 사용자가 파일 > 샘플에서 열면 시트에 데이터가 이미 있고, 단계별 마크다운 + 코드 블록이 그 데이터를 `xl()`로 읽어 모델을 산출한다(외부 파일 의존 없음).
+
+### K.2 데이터와 예제 구성
+
+| 데이터 | 열 | 예제 워크북 | 산출 모델 |
+|--------|----|-----------|----------|
+| mortality_table.xlsx (101행) | age, qx_male, qx_female | **위험률·생명표** (기존 생명표 예제 확장) | 성별 lx·dx·ex, Gompertz/Makeham 적합, 성별 사망률 비교 플롯 |
+| policy.xlsx (600행) | policy_id, product, channel, region, sex, age, premium, bmi, dependents … | **보험료 요인 분석** | 기술통계·교차표, GLM(감마/로그링크)로 보험료 요인 추정, 계수표 spill |
+| claims.xlsx (600행) | policy_id, product, channel, sex, age, age_band, region, claim_amt, claim_cnt, prem_before … | **빈도·심도 모형** | 심도(로그정규·감마·와이블 AIC 비교), 빈도(포아송·음이항 과산포 검정), 순보험료 = E[N]·E[X], 몬테카를로 합산 VaR/TVaR |
+| experience.xlsx (800행) | policy_id, product, sex, entry_age, duration_years, event | **생존분석·유지율** | Kaplan-Meier 생존곡선(자체 구현 — lifelines 불가), 경과기간별 해지율, 로그순위 비교 |
+| triangle.xlsx (8×8) | accident_year, dev_1..dev_8 | **지급준비금(체인래더)** (기존 예제 확장) | 개발계수·완성 삼각형·IBNR, Mack 표준오차 근사 |
+
+### K.3 구현 규칙
+
+- 데이터는 xlsx를 파싱해 **시트 셀로 내장**(생성 스크립트가 수행) — 워크북 하나로 완결. 열 이름은 원본 유지(영문), 마크다운 설명은 한국어.
+- 각 워크북 = `# 제목` 마크다운 + 단계별 [## 단계 설명 + 코드 블록] — 부록 H.3 가이드와 같은 형태. 자동 실행 없음, 로드 직후 **전체 실행이 성공**해야 한다(e2e로 검증).
+- 사용 라이브러리는 Pyodide 가용 범위(numpy·pandas·scipy·statsmodels·matplotlib)로 한정 — lifelines 등은 자체 구현으로 대체.
+- 파일 > 샘플 워크북 메뉴에 5종을 카테고리로 노출(기존 생명표·손해율 포함 정리).
