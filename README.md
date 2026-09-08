@@ -17,7 +17,21 @@ npm run dev        # http://localhost:3000 (COOP/COEP 헤더 포함 — 실행 �
 npm run build && npm start   # 프로덕션
 ```
 
-첫 방문 시 생명표 샘플 워크북이 열리고, Pyodide(numpy·pandas)는 jsDelivr CDN에서 백그라운드 로드됩니다(약 10초, 재방문은 브라우저 캐시). matplotlib 등은 첫 import 때 지연 로드됩니다.
+첫 방문 시 위험률·생명표 샘플 워크북이 열리고, Pyodide(numpy·pandas)는 jsDelivr CDN에서 백그라운드 로드됩니다(약 10초, 재방문은 브라우저 캐시). matplotlib 등은 첫 import 때 지연 로드됩니다.
+
+## 예제 워크북 (데이터 + 코드가 한 파일)
+
+**파일 > 샘플 워크북**의 계리 예제 5종은 데이터가 시트에 이미 들어 있고, 그 데이터를 `xl()`로 읽는 단계별 [설명 마크다운 + 코드 블록]이 함께 저장되어 있습니다 — 파일을 열고 **전체 실행**만 누르면 모델 산출까지 끝납니다(외부 파일·네트워크 의존 없음).
+
+| 예제 | 내장 데이터 | 산출 모델 |
+|------|------------|----------|
+| 위험률·생명표 | `mortality_table` 101행 | 성별 lx·dx·ex, Gompertz·Makeham 적합, 성별 사망률 비교 |
+| 보험료 요인 분석 (GLM) | `policy` 600행 | 기술통계·교차표, 감마 GLM(로그 링크) 계수·상대도, 예측 검증 |
+| 빈도·심도 모형 | `claims` 600행 | 심도 분포 AIC 비교, 포아송·음이항 과산포, 순보험료, 몬테카를로 VaR·TVaR |
+| 생존분석·유지율 | `experience` 800행 | Kaplan-Meier 생존곡선(자체 구현), 구간별 해지율, 로그순위 검정 |
+| 지급준비금 (체인래더) | `triangle` 8×8 | 개발계수·완성 삼각형·IBNR, Mack 표준오차 |
+
+원본 데이터(`public/samples/*.xlsx`)를 그리드로 따로 가져오려면 **파일 > 데이터 불러오기 > 샘플 데이터셋**을 쓰세요. 워크북 JSON은 `.claude/skills/sample-workbook-gen/scripts/build_samples.py`가 생성합니다.
 
 ## 브라우저 파이썬의 한계
 

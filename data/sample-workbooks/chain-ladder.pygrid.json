@@ -1,48 +1,48 @@
 {
  "id": "wb-sample-chain-ladder",
  "version": 1,
- "title": "체인래더 준비금 예제",
+ "title": "지급준비금 체인래더 예제",
  "sheets": [
   {
-   "id": "sh-cl-tri",
-   "name": "삼각형",
-   "rowCount": 60,
+   "id": "sh-triangle",
+   "name": "triangle",
+   "rowCount": 80,
    "colCount": 26,
    "cells": {
     "0:0": {
-     "v": "사고연도",
+     "v": "accident_year",
      "t": "s"
     },
     "0:1": {
-     "v": "1년차",
+     "v": "dev_1",
      "t": "s"
     },
     "0:2": {
-     "v": "2년차",
+     "v": "dev_2",
      "t": "s"
     },
     "0:3": {
-     "v": "3년차",
+     "v": "dev_3",
      "t": "s"
     },
     "0:4": {
-     "v": "4년차",
+     "v": "dev_4",
      "t": "s"
     },
     "0:5": {
-     "v": "5년차",
+     "v": "dev_5",
      "t": "s"
     },
     "0:6": {
-     "v": "6년차",
+     "v": "dev_6",
      "t": "s"
     },
     "0:7": {
-     "v": "7년차",
+     "v": "dev_7",
      "t": "s"
     },
     "0:8": {
-     "v": "8년차",
+     "v": "dev_8",
      "t": "s"
     },
     "1:0": {
@@ -50,35 +50,35 @@
      "t": "n"
     },
     "1:1": {
-     "v": 2335,
+     "v": 1943,
      "t": "n"
     },
     "1:2": {
-     "v": 4433,
+     "v": 3287,
      "t": "n"
     },
     "1:3": {
-     "v": 6055,
+     "v": 4157,
      "t": "n"
     },
     "1:4": {
-     "v": 7090,
+     "v": 4711,
      "t": "n"
     },
     "1:5": {
-     "v": 7756,
+     "v": 5080,
      "t": "n"
     },
     "1:6": {
-     "v": 8265,
+     "v": 5312,
      "t": "n"
     },
     "1:7": {
-     "v": 8534,
+     "v": 5489,
      "t": "n"
     },
     "1:8": {
-     "v": 8658,
+     "v": 5608,
      "t": "n"
     },
     "2:0": {
@@ -86,31 +86,31 @@
      "t": "n"
     },
     "2:1": {
-     "v": 2314,
+     "v": 1778,
      "t": "n"
     },
     "2:2": {
-     "v": 4195,
+     "v": 3372,
      "t": "n"
     },
     "2:3": {
-     "v": 5503,
+     "v": 4209,
      "t": "n"
     },
     "2:4": {
-     "v": 6453,
+     "v": 4754,
      "t": "n"
     },
     "2:5": {
-     "v": 7038,
+     "v": 5043,
      "t": "n"
     },
     "2:6": {
-     "v": 7489,
+     "v": 5282,
      "t": "n"
     },
     "2:7": {
-     "v": 7716,
+     "v": 5436,
      "t": "n"
     },
     "3:0": {
@@ -118,27 +118,27 @@
      "t": "n"
     },
     "3:1": {
-     "v": 2683,
+     "v": 1682,
      "t": "n"
     },
     "3:2": {
-     "v": 5367,
+     "v": 3293,
      "t": "n"
     },
     "3:3": {
-     "v": 7454,
+     "v": 4236,
      "t": "n"
     },
     "3:4": {
-     "v": 8884,
+     "v": 4830,
      "t": "n"
     },
     "3:5": {
-     "v": 9840,
+     "v": 5210,
      "t": "n"
     },
     "3:6": {
-     "v": 10386,
+     "v": 5507,
      "t": "n"
     },
     "4:0": {
@@ -146,23 +146,23 @@
      "t": "n"
     },
     "4:1": {
-     "v": 2871,
+     "v": 1982,
      "t": "n"
     },
     "4:2": {
-     "v": 5708,
+     "v": 3487,
      "t": "n"
     },
     "4:3": {
-     "v": 7694,
+     "v": 4576,
      "t": "n"
     },
     "4:4": {
-     "v": 9141,
+     "v": 5129,
      "t": "n"
     },
     "4:5": {
-     "v": 10188,
+     "v": 5589,
      "t": "n"
     },
     "5:0": {
@@ -170,19 +170,19 @@
      "t": "n"
     },
     "5:1": {
-     "v": 2634,
+     "v": 2087,
      "t": "n"
     },
     "5:2": {
-     "v": 5023,
+     "v": 3897,
      "t": "n"
     },
     "5:3": {
-     "v": 6743,
+     "v": 4937,
      "t": "n"
     },
     "5:4": {
-     "v": 8018,
+     "v": 5625,
      "t": "n"
     },
     "6:0": {
@@ -190,15 +190,15 @@
      "t": "n"
     },
     "6:1": {
-     "v": 2884,
+     "v": 2373,
      "t": "n"
     },
     "6:2": {
-     "v": 5855,
+     "v": 4307,
      "t": "n"
     },
     "6:3": {
-     "v": 7744,
+     "v": 5447,
      "t": "n"
     },
     "7:0": {
@@ -206,11 +206,11 @@
      "t": "n"
     },
     "7:1": {
-     "v": 3284,
+     "v": 2379,
      "t": "n"
     },
     "7:2": {
-     "v": 6409,
+     "v": 4397,
      "t": "n"
     },
     "8:0": {
@@ -218,7 +218,7 @@
      "t": "n"
     },
     "8:1": {
-     "v": 3404,
+     "v": 2747,
      "t": "n"
     }
    }
@@ -227,7 +227,7 @@
  "pyBlocks": [
   {
    "id": "blk-cl-title",
-   "sheetId": "sh-cl-tri",
+   "sheetId": "sh-triangle",
    "anchor": {
     "r": 0,
     "c": 10
@@ -237,11 +237,11 @@
    "includeIndex": "auto",
    "kind": "markdown",
    "title": "지급준비금 — 체인래더",
-   "markdown": "# 지급준비금 — 체인래더\n\n런오프 삼각형(행=사고연도, 열=개발연차, 값=누적 지급보험금·백만원)의 개발 패턴으로\n미지급 보험금(IBNR 포함)을 추정하는 Chain-Ladder 예제입니다. 하삼각(미래)은 빈 셀이며,\n모든 블록은 시트의 `삼각형!A1:I9` 범위를 xl()로 읽습니다."
+   "markdown": "# 지급준비금 — 체인래더\n\n`triangle` 시트의 런오프 삼각형(사고연도 8 × 개발연차 8, 누적 지급보험금)으로\n개발계수를 뽑아 미지급 보험금(IBNR 포함)을 추정하고, **Mack 표준오차**로 추정의 불확실성까지 붙입니다.\n\n> 모든 블록은 `xl(\"triangle!A1:I9\")`로 시트를 다시 읽어 단독 실행됩니다."
   },
   {
    "id": "blk-cl-md1",
-   "sheetId": "sh-cl-tri",
+   "sheetId": "sh-triangle",
    "anchor": {
     "r": 2,
     "c": 10
@@ -251,25 +251,25 @@
    "includeIndex": "auto",
    "kind": "markdown",
    "title": "1단계 — 개발계수",
-   "markdown": "## 1단계 — 개발계수\n\n볼륨가중 개발계수 f_j = Σc_{i,j+1}/Σc_{i,j}를 구합니다 — 분자·분모 모두 두 칸이 다\n관측된 행만 합산하는 NaN 마스킹이 구현의 핵심입니다. 누적계수 CDF와 지급진행률(1/CDF)로\n각 연차까지 최종 지급의 몇 %가 진행됐는지 확인하세요."
+   "markdown": "## 1단계 — 개발계수\n\n`triangle` 시트는 행=사고연도, 열=개발연차(`dev_1`~`dev_8`), 값=누적 지급보험금인 런오프 삼각형입니다.\n하삼각(미래)은 빈 셀이라 `xl()`로 읽으면 `NaN`이 됩니다.\n\n볼륨가중 개발계수 `f_j = Σc(i,j+1)/Σc(i,j)` — 분자·분모 **두 칸이 모두 관측된 행만** 합산하는\nNaN 마스킹이 구현의 핵심입니다. 누적계수 CDF와 지급진행률(1/CDF)로 각 연차까지\n최종 지급의 몇 %가 진행됐는지 확인하세요."
   },
   {
-   "id": "blk-cl-f",
-   "sheetId": "sh-cl-tri",
+   "id": "blk-cl-c1",
+   "sheetId": "sh-triangle",
    "anchor": {
     "r": 4,
     "c": 10
    },
    "outputMode": "values",
    "includeIndex": "auto",
-   "title": "개발계수·누적계수",
-   "code": "df = xl(\"삼각형!A1:I9\", headers=True)\ntri = df.iloc[:, 1:].apply(pd.to_numeric, errors=\"coerce\").to_numpy(dtype=float)\nn = tri.shape[0]\n# 볼륨가중 개발계수 f_j = Σc_{i,j+1} / Σc_{i,j} — 두 칸 모두 관측된 행만 합산(NaN 마스킹)\nf = np.ones(n - 1)\nfor j in range(n - 1):\n    m = ~np.isnan(tri[:, j]) & ~np.isnan(tri[:, j + 1])\n    f[j] = tri[m, j + 1].sum() / tri[m, j].sum()\ncdf = np.append(np.cumprod(f[::-1])[::-1], 1.0)   # 누적개발계수(마지막 연차 = 1)\npd.DataFrame({\"구간\": [f\"{j+1}→{j+2}년차\" for j in range(n - 1)] + [\"최종\"],\n              \"개발계수 f\": np.append(f, 1.0).round(4),\n              \"누적계수 CDF\": cdf.round(4),\n              \"지급진행률\": (1 / cdf).round(4)})"
+   "title": "개발계수 · 누적계수",
+   "code": "df = xl(\"triangle!A1:I9\", headers=True)\nyears = df[\"accident_year\"].astype(int).to_numpy()\ntri = df.iloc[:, 1:].apply(pd.to_numeric, errors=\"coerce\").to_numpy(dtype=float)\nn = tri.shape[0]\n# 볼륨가중 개발계수 f_j = Σc(i,j+1) / Σc(i,j) — 두 칸 모두 관측된 행만 합산(NaN 마스킹)\nf = np.ones(n - 1)\nS = np.zeros(n - 1)                      # Σc(i,j) — Mack 표준오차에서 재사용\nfor j in range(n - 1):\n    m = ~np.isnan(tri[:, j]) & ~np.isnan(tri[:, j + 1])\n    S[j] = tri[m, j].sum()\n    f[j] = tri[m, j + 1].sum() / S[j]\n\ncdf = np.append(np.cumprod(f[::-1])[::-1], 1.0)     # 누적개발계수(마지막 연차 = 1)\npd.DataFrame({\"구간\": [f\"dev_{j + 1}→dev_{j + 2}\" for j in range(n - 1)] + [\"최종\"],\n              \"개발계수 f\": np.append(f, 1.0).round(4),\n              \"누적계수 CDF\": cdf.round(4),\n              \"지급진행률\": (1 / cdf).round(4)})"
   },
   {
    "id": "blk-cl-md2",
-   "sheetId": "sh-cl-tri",
+   "sheetId": "sh-triangle",
    "anchor": {
-    "r": 16,
+    "r": 15,
     "c": 10
    },
    "code": "",
@@ -277,45 +277,97 @@
    "includeIndex": "auto",
    "kind": "markdown",
    "title": "2단계 — 삼각형 완성",
-   "markdown": "## 2단계 — 삼각형 완성\n\n각 사고연도의 최신 관측값에 개발계수를 차례로 곱해 하삼각(미래 지급)을 채웁니다.\n완성 삼각형의 마지막 열이 사고연도별 최종예상(Ultimate)입니다."
+   "markdown": "## 2단계 — 삼각형 완성\n\n각 사고연도의 최신 관측값에 개발계수를 차례로 곱해 하삼각(미래 지급)을 채웁니다.\n완성 삼각형의 마지막 열이 사고연도별 **최종예상(Ultimate)**입니다.\n상삼각(관측)은 원본 값 그대로여야 하니 1~2행을 시트와 대조해 보세요."
   },
   {
-   "id": "blk-cl-full",
-   "sheetId": "sh-cl-tri",
+   "id": "blk-cl-c2",
+   "sheetId": "sh-triangle",
    "anchor": {
-    "r": 18,
+    "r": 17,
     "c": 10
    },
    "outputMode": "values",
    "includeIndex": "auto",
    "title": "완성 삼각형",
-   "code": "df = xl(\"삼각형!A1:I9\", headers=True)\ntri = df.iloc[:, 1:].apply(pd.to_numeric, errors=\"coerce\").to_numpy(dtype=float)\nn = tri.shape[0]\n# 볼륨가중 개발계수 f_j = Σc_{i,j+1} / Σc_{i,j} — 두 칸 모두 관측된 행만 합산(NaN 마스킹)\nf = np.ones(n - 1)\nfor j in range(n - 1):\n    m = ~np.isnan(tri[:, j]) & ~np.isnan(tri[:, j + 1])\n    f[j] = tri[m, j + 1].sum() / tri[m, j].sum()\nfull = tri.copy()\nfor i in range(n):\n    for j in range(n - i, n):                     # i번째 행의 미관측 구간\n        full[i, j] = full[i, j - 1] * f[j - 1]\nout = pd.DataFrame(full.round(0), columns=[f\"{j+1}년차\" for j in range(n)])\nout.insert(0, \"사고연도\", df[\"사고연도\"].astype(int).to_numpy())\nout"
+   "code": "df = xl(\"triangle!A1:I9\", headers=True)\nyears = df[\"accident_year\"].astype(int).to_numpy()\ntri = df.iloc[:, 1:].apply(pd.to_numeric, errors=\"coerce\").to_numpy(dtype=float)\nn = tri.shape[0]\n# 볼륨가중 개발계수 f_j = Σc(i,j+1) / Σc(i,j) — 두 칸 모두 관측된 행만 합산(NaN 마스킹)\nf = np.ones(n - 1)\nS = np.zeros(n - 1)                      # Σc(i,j) — Mack 표준오차에서 재사용\nfor j in range(n - 1):\n    m = ~np.isnan(tri[:, j]) & ~np.isnan(tri[:, j + 1])\n    S[j] = tri[m, j].sum()\n    f[j] = tri[m, j + 1].sum() / S[j]\n\nfull = tri.copy()\nfor i in range(n):\n    for j in range(n - i, n):             # i번째 행의 미관측 구간을 개발계수로 채운다\n        full[i, j] = full[i, j - 1] * f[j - 1]\nlatest = np.array([tri[i, n - 1 - i] for i in range(n)])     # 최신 대각선(현재까지 누적 지급)\nultimate = full[:, -1]\nreserve = ultimate - latest\n\nout = pd.DataFrame(full.round(0), columns=[f\"dev_{j + 1}\" for j in range(n)])\nout.insert(0, \"accident_year\", years)\nout"
   },
   {
    "id": "blk-cl-md3",
-   "sheetId": "sh-cl-tri",
+   "sheetId": "sh-triangle",
    "anchor": {
-    "r": 30,
+    "r": 28,
     "c": 10
    },
    "code": "",
    "outputMode": "values",
    "includeIndex": "auto",
    "kind": "markdown",
-   "title": "3단계 — 지급준비금",
-   "markdown": "## 3단계 — 지급준비금\n\n준비금 = 최종예상 − 현재까지 누적 지급(최신 대각선). 2016년은 완전 진전(8년차 관측)이라\n준비금 0이어야 정상이고, 최근 사고연도일수록 준비금이 커집니다 — 초기 관측 하나가\n누적개발계수로 증폭되므로 최근 연도는 BF 병행 검토가 실무 관례입니다."
+   "title": "3단계 — 사고연도별 지급준비금",
+   "markdown": "## 3단계 — 사고연도별 지급준비금\n\n준비금 = 최종예상 − 현재까지 누적 지급(최신 대각선).\n가장 오래된 사고연도는 8년차까지 관측되어 완전 진전이므로 **준비금 0**이어야 정상이고,\n최근 사고연도일수록 준비금이 커집니다 — 초기 관측 하나가 누적개발계수로 증폭되므로\n최근 연도는 Bornhuetter-Ferguson 병행 검토가 실무 관례입니다."
   },
   {
-   "id": "blk-cl-reserve",
-   "sheetId": "sh-cl-tri",
+   "id": "blk-cl-c3",
+   "sheetId": "sh-triangle",
    "anchor": {
-    "r": 32,
+    "r": 30,
     "c": 10
    },
    "outputMode": "values",
    "includeIndex": "auto",
-   "title": "사고연도별 지급준비금",
-   "code": "df = xl(\"삼각형!A1:I9\", headers=True)\ntri = df.iloc[:, 1:].apply(pd.to_numeric, errors=\"coerce\").to_numpy(dtype=float)\nn = tri.shape[0]\n# 볼륨가중 개발계수 f_j = Σc_{i,j+1} / Σc_{i,j} — 두 칸 모두 관측된 행만 합산(NaN 마스킹)\nf = np.ones(n - 1)\nfor j in range(n - 1):\n    m = ~np.isnan(tri[:, j]) & ~np.isnan(tri[:, j + 1])\n    f[j] = tri[m, j + 1].sum() / tri[m, j].sum()\nfull = tri.copy()\nfor i in range(n):\n    for j in range(n - i, n):\n        full[i, j] = full[i, j - 1] * f[j - 1]\nlatest = np.array([tri[i, n - 1 - i] for i in range(n)])   # 최신 대각선\nultimate = full[:, -1]\nreserve = ultimate - latest\nprint(f\"총 지급준비금 = {reserve.sum():,.0f} 백만원\")\npd.DataFrame({\"사고연도\": df[\"사고연도\"].astype(int).to_numpy(),\n              \"현재누적\": latest.round(0), \"최종예상\": ultimate.round(0),\n              \"준비금\": reserve.round(0)})"
+   "title": "지급준비금",
+   "code": "df = xl(\"triangle!A1:I9\", headers=True)\nyears = df[\"accident_year\"].astype(int).to_numpy()\ntri = df.iloc[:, 1:].apply(pd.to_numeric, errors=\"coerce\").to_numpy(dtype=float)\nn = tri.shape[0]\n# 볼륨가중 개발계수 f_j = Σc(i,j+1) / Σc(i,j) — 두 칸 모두 관측된 행만 합산(NaN 마스킹)\nf = np.ones(n - 1)\nS = np.zeros(n - 1)                      # Σc(i,j) — Mack 표준오차에서 재사용\nfor j in range(n - 1):\n    m = ~np.isnan(tri[:, j]) & ~np.isnan(tri[:, j + 1])\n    S[j] = tri[m, j].sum()\n    f[j] = tri[m, j + 1].sum() / S[j]\n\nfull = tri.copy()\nfor i in range(n):\n    for j in range(n - i, n):             # i번째 행의 미관측 구간을 개발계수로 채운다\n        full[i, j] = full[i, j - 1] * f[j - 1]\nlatest = np.array([tri[i, n - 1 - i] for i in range(n)])     # 최신 대각선(현재까지 누적 지급)\nultimate = full[:, -1]\nreserve = ultimate - latest\n\nprint(f\"총 지급준비금 = {reserve.sum():,.0f}\")\npd.DataFrame({\"accident_year\": years, \"현재누적\": latest.round(0),\n              \"최종예상\": ultimate.round(0), \"준비금\": reserve.round(0)})"
+  },
+  {
+   "id": "blk-cl-md4",
+   "sheetId": "sh-triangle",
+   "anchor": {
+    "r": 41,
+    "c": 10
+   },
+   "code": "",
+   "outputMode": "values",
+   "includeIndex": "auto",
+   "kind": "markdown",
+   "title": "4단계 — Mack 표준오차",
+   "markdown": "## 4단계 — Mack 표준오차\n\n체인래더는 점추정만 주므로 **추정오차**를 Mack(1993) 공식으로 붙입니다.\n\n- `σ²_j = 1/(n−j−1) · Σ c(i,j)·(개별계수 − f_j)²` — 연차별 변동성\n- 마지막 연차는 관측이 부족해 `min(σ⁴_{n-2}/σ²_{n-3}, σ²_{n-3}, σ²_{n-2})`로 외삽합니다\n- 총계의 오차는 사고연도 간 **공통 개발계수**를 통한 상관항까지 더해야 합니다\n\n변동계수(CV = 표준오차/준비금)가 최근 연도일수록 커지면 정상입니다 — 관측이 적기 때문입니다."
+  },
+  {
+   "id": "blk-cl-c4",
+   "sheetId": "sh-triangle",
+   "anchor": {
+    "r": 43,
+    "c": 10
+   },
+   "outputMode": "values",
+   "includeIndex": "auto",
+   "title": "Mack 표준오차 · 변동계수",
+   "code": "df = xl(\"triangle!A1:I9\", headers=True)\nyears = df[\"accident_year\"].astype(int).to_numpy()\ntri = df.iloc[:, 1:].apply(pd.to_numeric, errors=\"coerce\").to_numpy(dtype=float)\nn = tri.shape[0]\n# 볼륨가중 개발계수 f_j = Σc(i,j+1) / Σc(i,j) — 두 칸 모두 관측된 행만 합산(NaN 마스킹)\nf = np.ones(n - 1)\nS = np.zeros(n - 1)                      # Σc(i,j) — Mack 표준오차에서 재사용\nfor j in range(n - 1):\n    m = ~np.isnan(tri[:, j]) & ~np.isnan(tri[:, j + 1])\n    S[j] = tri[m, j].sum()\n    f[j] = tri[m, j + 1].sum() / S[j]\n\nfull = tri.copy()\nfor i in range(n):\n    for j in range(n - i, n):             # i번째 행의 미관측 구간을 개발계수로 채운다\n        full[i, j] = full[i, j - 1] * f[j - 1]\nlatest = np.array([tri[i, n - 1 - i] for i in range(n)])     # 최신 대각선(현재까지 누적 지급)\nultimate = full[:, -1]\nreserve = ultimate - latest\n\nsig2 = np.zeros(n - 1)\nfor j in range(n - 1):\n    m = ~np.isnan(tri[:, j]) & ~np.isnan(tri[:, j + 1])\n    k = int(m.sum())\n    if k >= 2:\n        sig2[j] = np.sum(tri[m, j] * (tri[m, j + 1] / tri[m, j] - f[j]) ** 2) / (k - 1)\nif n >= 4 and sig2[n - 2] == 0:          # 마지막 연차 외삽 (Mack 1993)\n    sig2[n - 2] = min(sig2[n - 3] ** 2 / sig2[n - 4], sig2[n - 3], sig2[n - 4])\n\nmse = np.zeros(n)\nfor i in range(1, n):                    # i=0은 완전 진전이라 오차 0\n    acc = 0.0\n    for j in range(n - i, n):            # 미관측 구간의 전이 (0-based: 마지막 관측 열 = n-1-i)\n        acc += (sig2[j - 1] / f[j - 1] ** 2) * (1 / full[i, j - 1] + 1 / S[j - 1])\n    mse[i] = ultimate[i] ** 2 * acc\n\ncross = 0.0\nfor i in range(1, n):\n    for k in range(i + 1, n):\n        cross += 2 * ultimate[i] * ultimate[k] * sum(\n            (sig2[j - 1] / f[j - 1] ** 2) / S[j - 1] for j in range(n - i, n))\nse = np.sqrt(mse)\nse_total = float(np.sqrt(mse.sum() + cross))\nout = pd.DataFrame({\"accident_year\": years, \"준비금\": reserve.round(0),\n                    \"표준오차\": se.round(0),\n                    \"CV\": np.where(reserve > 0, se / np.where(reserve > 0, reserve, 1), 0).round(3)})\ntot = pd.DataFrame([{\"accident_year\": \"합계\", \"준비금\": round(reserve.sum(), 0),\n                     \"표준오차\": round(se_total, 0),\n                     \"CV\": round(se_total / reserve.sum(), 3)}])\npd.concat([out, tot], ignore_index=True)"
+  },
+  {
+   "id": "blk-cl-md5",
+   "sheetId": "sh-triangle",
+   "anchor": {
+    "r": 55,
+    "c": 10
+   },
+   "code": "",
+   "outputMode": "values",
+   "includeIndex": "auto",
+   "kind": "markdown",
+   "title": "5단계 — 준비금·오차 그림",
+   "markdown": "## 5단계 — 준비금·오차 그림\n\n사고연도별 준비금을 막대로, Mack 표준오차를 오차막대로 겹쳐 그립니다.\n오른쪽 그림의 개발 패턴(누적 지급진행률)이 매끄럽게 1에 수렴하지 않으면\n삼각형에 이상치가 섞였다는 신호입니다."
+  },
+  {
+   "id": "blk-cl-c5",
+   "sheetId": "sh-triangle",
+   "anchor": {
+    "r": 57,
+    "c": 10
+   },
+   "outputMode": "object",
+   "includeIndex": "auto",
+   "title": "준비금 막대 · 개발 패턴",
+   "code": "import matplotlib.pyplot as plt\ndf = xl(\"triangle!A1:I9\", headers=True)\nyears = df[\"accident_year\"].astype(int).to_numpy()\ntri = df.iloc[:, 1:].apply(pd.to_numeric, errors=\"coerce\").to_numpy(dtype=float)\nn = tri.shape[0]\n# 볼륨가중 개발계수 f_j = Σc(i,j+1) / Σc(i,j) — 두 칸 모두 관측된 행만 합산(NaN 마스킹)\nf = np.ones(n - 1)\nS = np.zeros(n - 1)                      # Σc(i,j) — Mack 표준오차에서 재사용\nfor j in range(n - 1):\n    m = ~np.isnan(tri[:, j]) & ~np.isnan(tri[:, j + 1])\n    S[j] = tri[m, j].sum()\n    f[j] = tri[m, j + 1].sum() / S[j]\n\nfull = tri.copy()\nfor i in range(n):\n    for j in range(n - i, n):             # i번째 행의 미관측 구간을 개발계수로 채운다\n        full[i, j] = full[i, j - 1] * f[j - 1]\nlatest = np.array([tri[i, n - 1 - i] for i in range(n)])     # 최신 대각선(현재까지 누적 지급)\nultimate = full[:, -1]\nreserve = ultimate - latest\n\nsig2 = np.zeros(n - 1)\nfor j in range(n - 1):\n    m = ~np.isnan(tri[:, j]) & ~np.isnan(tri[:, j + 1])\n    k = int(m.sum())\n    if k >= 2:\n        sig2[j] = np.sum(tri[m, j] * (tri[m, j + 1] / tri[m, j] - f[j]) ** 2) / (k - 1)\nif n >= 4 and sig2[n - 2] == 0:\n    sig2[n - 2] = min(sig2[n - 3] ** 2 / sig2[n - 4], sig2[n - 3], sig2[n - 4])\nmse = np.zeros(n)\nfor i in range(1, n):\n    mse[i] = ultimate[i] ** 2 * sum(\n        (sig2[j - 1] / f[j - 1] ** 2) * (1 / full[i, j - 1] + 1 / S[j - 1]) for j in range(n - i, n))\n\nfig, ax = plt.subplots(1, 2, figsize=(10.5, 3.8))\nax[0].bar([str(y) for y in years], reserve, yerr=np.sqrt(mse), capsize=3, color=\"#4A90C2\")\nax[0].set_title(\"사고연도별 준비금 ± Mack 표준오차\"); ax[0].tick_params(axis=\"x\", rotation=45)\ncdf = np.append(np.cumprod(f[::-1])[::-1], 1.0)\nax[1].plot(range(1, n + 1), 1 / cdf, \"o-\", color=\"#4A90C2\")\nax[1].set_title(\"개발 패턴 (누적 지급진행률)\"); ax[1].set_xlabel(\"개발연차\")\nax[1].set_ylim(0, 1.05); ax[1].grid(alpha=0.3)\nfig.tight_layout()\nfig"
   }
  ],
  "initScript": "",

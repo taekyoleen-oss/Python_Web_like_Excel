@@ -64,53 +64,7 @@ test("저장 다운로드 → 새 워크북 → 다시 열기 → 셀·블록 �
   expect(restored.anchor).toEqual({ r: 0, c: 3 });
 });
 
-test("샘플 워크북(생명표) → 전체 실행 → lx spill + 히스토그램 카드", async ({ page }) => {
-  test.setTimeout(300_000);
-  await page.goto("/");
-  await waitForApp(page);
-
-  await page.getByRole("button", { name: "파일" }).click();
-  await page.getByRole("menuitem", { name: "샘플: 생명표" }).click();
-  await expect
-    .poll(() =>
-      page.evaluate(() => (window as any).__pygridStore.getState().workbook.title),
-    )
-    .toBe("생명표 예제");
-
-  await page.getByRole("button", { name: "전체 실행", exact: true }).click();
-
-  // 값 블록(D1): lx 포함 DataFrame spill — src 셀 다수
-  await expect
-    .poll(
-      () =>
-        page.evaluate(() => {
-          const st = (window as any).__pygridStore.getState();
-          const blockId = st.workbook.pyBlocks.find(
-            (b: any) => b.kind !== "markdown" && b.outputMode === "values",
-          )?.id;
-          return Object.values(st.workbook.sheets[0].cells).filter(
-            (c: any) => typeof c.src === "string" && c.src.split(":")[0] === blockId,
-          ).length;
-        }),
-      { timeout: 240_000, intervals: [2000] },
-    )
-    .toBeGreaterThan(200);
-
-  // 객체 블록(I2): 히스토그램 Figure 카드
-  await expect
-    .poll(async () => String((await cellAt(page, "1:8"))?.v ?? ""), {
-      timeout: 120_000,
-      intervals: [2000],
-    })
-    .toMatch(/^\[Figure/);
-  const statuses = await page.evaluate(() =>
-    (window as any).__pygridStore
-      .getState()
-      .workbook.pyBlocks.filter((b: any) => b.kind !== "markdown")
-      .map((b: any) => b.last?.status),
-  );
-  expect(statuses).toEqual(["ok", "ok"]);
-});
+// 샘플 워크북 로드 → 전체 실행 검증은 sample-workbooks.spec.ts(부록 K 5종)로 옮겼다.
 
 test("XLSX 내보내기 다운로드", async ({ page }) => {
   await page.goto("/");

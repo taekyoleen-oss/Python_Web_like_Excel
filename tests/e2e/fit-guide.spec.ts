@@ -1,7 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
 
 // 부록 H: 모델적합 가이드 마법사(샘플 claims → 심도 → 로그정규+지수) 실런타임 검증 +
-// 보험 예제 워크북 2종(청구 심도 적합·체인래더) 로드 → 전체 실행 성공.
+// 보험 예제 워크북(청구 심도 적합) 로드 → 전체 실행 성공.
+// 부록 K 데이터 내장 워크북 5종(체인래더 확장판 포함)은 sample-workbooks.spec.ts가 다룬다.
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -117,21 +118,21 @@ test("마법사: 샘플 claims → 심도 → 로그정규+지수 → 블록 9�
   expect(await codeStatuses(page)).toEqual(["ok", "ok", "ok", "ok"]);
 });
 
-test("샘플 예제 2종: 청구 심도 적합 · 체인래더 — 로드 직후 전체 실행 성공", async ({ page }) => {
-  test.setTimeout(480_000);
+test("샘플 예제: 청구 심도 적합 — 로드 직후 전체 실행 성공", async ({ page }) => {
+  test.setTimeout(300_000);
   await page.goto("/");
   await waitForApp(page);
 
-  // ── 청구 심도 적합 ──
   await page.getByRole("button", { name: "파일" }).click();
-  await page.getByRole("menuitem", { name: "샘플: 청구 심도 적합" }).click();
+  await page.getByRole("menuitem", { name: "샘플 워크북" }).click();
+  await page.getByRole("menuitem", { name: "청구 심도 적합", exact: true }).click();
   await expect
     .poll(() => page.evaluate(() => (window as any).__pygridStore.getState().workbook.title))
     .toBe("청구 심도 적합 예제");
 
   await page.getByRole("button", { name: "전체 실행", exact: true }).click();
   await expect
-    .poll(() => countCellsWith(page, "AIC"), { timeout: 360_000, intervals: [3000] })
+    .poll(() => countCellsWith(page, "AIC"), { timeout: 240_000, intervals: [3000] })
     .toBeGreaterThan(0);
   await expect
     .poll(async () => String((await anchorCellValue(page, 8)) ?? ""), {
@@ -140,32 +141,4 @@ test("샘플 예제 2종: 청구 심도 적합 · 체인래더 — 로드 직후
     })
     .toMatch(/^\[Figure/);
   expect(await codeStatuses(page)).toEqual(["ok", "ok", "ok", "ok"]);
-
-  // ── 체인래더 ──
-  await page.getByRole("button", { name: "파일" }).click();
-  await page.getByRole("menuitem", { name: "샘플: 체인래더 준비금" }).click();
-  await expect
-    .poll(() => page.evaluate(() => (window as any).__pygridStore.getState().workbook.title))
-    .toBe("체인래더 준비금 예제");
-
-  await page.getByRole("button", { name: "전체 실행", exact: true }).click();
-  // 준비금 spill — 헤더 "준비금" + 8개 사고연도 값(2016=0, 2023>9000)
-  await expect
-    .poll(() => countCellsWith(page, "준비금"), { timeout: 240_000, intervals: [3000] })
-    .toBeGreaterThan(0);
-  const reserves = await page.evaluate(() => {
-    const st = (window as any).__pygridStore.getState();
-    const sheet = st.workbook.sheets[0];
-    // "준비금" 헤더 셀을 찾아 그 아래 8개 값을 읽는다
-    const entry = Object.entries(sheet.cells).find(([, c]: any) => c.v === "준비금");
-    if (!entry) return null;
-    const [r, c] = entry[0].split(":").map(Number);
-    const vals: unknown[] = [];
-    for (let i = 1; i <= 8; i++) vals.push(sheet.cells[`${r + i}:${c}`]?.v ?? null);
-    return vals;
-  });
-  expect(reserves).not.toBeNull();
-  expect(reserves![0]).toBe(0); // 2016 완전 진전 → 준비금 0
-  expect(Number(reserves![7])).toBeGreaterThan(9000); // 2023 최근 연도가 최대
-  expect(await codeStatuses(page)).toEqual(["ok", "ok", "ok"]);
 });

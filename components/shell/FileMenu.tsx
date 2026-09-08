@@ -24,6 +24,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuSub,
   DropdownMenuSubContent,
@@ -48,10 +49,53 @@ export function loadWorkbookData(wb: Workbook): void {
   useWorkbookStore.getState().loadWorkbook(structuredClone(wb));
 }
 
+/** 첫 방문 기본 워크북 (WorkbookShell) */
 export const SAMPLE_LIFE_TABLE = lifeTableSample as unknown as Workbook;
-export const SAMPLE_LOSS_RATIO = lossRatioSample as unknown as Workbook;
-export const SAMPLE_CLAIM_SEVERITY = claimSeveritySample as unknown as Workbook;
-export const SAMPLE_CHAIN_LADDER = chainLadderSample as unknown as Workbook;
+
+interface SampleWorkbook {
+  label: string;
+  /** 데이터 내장 워크북은 수백 KB라 첫 페인트를 막지 않도록 클릭 시 동적 로드한다 */
+  load: () => Promise<Workbook>;
+}
+
+const dyn = (m: Promise<{ default: unknown }>): Promise<Workbook> =>
+  m.then((r) => r.default as Workbook);
+
+/** 부록 K — 계리 예제 데이터 내장 워크북 5종 (데이터 + 단계별 코드가 한 파일) */
+const SAMPLE_ACTUARIAL: SampleWorkbook[] = [
+  { label: "위험률·생명표", load: async () => SAMPLE_LIFE_TABLE },
+  {
+    label: "보험료 요인 분석 (GLM)",
+    load: () => dyn(import("@/data/sample-workbooks/premium-glm.pygrid.json")),
+  },
+  {
+    label: "빈도·심도 모형",
+    load: () => dyn(import("@/data/sample-workbooks/freq-severity.pygrid.json")),
+  },
+  {
+    label: "생존분석·유지율",
+    load: () => dyn(import("@/data/sample-workbooks/survival-retention.pygrid.json")),
+  },
+  {
+    label: "지급준비금 (체인래더)",
+    load: async () => chainLadderSample as unknown as Workbook,
+  },
+];
+
+/** 기능 소개용 소형 예제 (부록 H.2) */
+const SAMPLE_BASIC: SampleWorkbook[] = [
+  { label: "손해율 집계", load: async () => lossRatioSample as unknown as Workbook },
+  { label: "청구 심도 적합", load: async () => claimSeveritySample as unknown as Workbook },
+];
+
+/** 샘플 워크북 열기 — 동적 로드 실패(오프라인 등)는 토스트로 알린다 */
+async function openSampleWorkbook(s: SampleWorkbook): Promise<void> {
+  try {
+    loadWorkbookData(await s.load());
+  } catch (e) {
+    toast.error(`샘플을 불러오지 못했습니다: ${(e as Error).message}`);
+  }
+}
 
 /** 확장자별 열기 — FileMenu 선택·드래그 앤 드롭 공용 */
 export async function openWorkbookFile(file: File): Promise<void> {
@@ -275,18 +319,28 @@ export default function FileMenu() {
             CSV로 내보내기 (활성 시트)
           </DropdownMenuItem>
           <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={() => loadWorkbookData(SAMPLE_LIFE_TABLE)}>
-            샘플: 생명표
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => loadWorkbookData(SAMPLE_LOSS_RATIO)}>
-            샘플: 손해율 집계
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => loadWorkbookData(SAMPLE_CLAIM_SEVERITY)}>
-            샘플: 청구 심도 적합
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => loadWorkbookData(SAMPLE_CHAIN_LADDER)}>
-            샘플: 체인래더 준비금
-          </DropdownMenuItem>
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger>샘플 워크북</DropdownMenuSubTrigger>
+            <DropdownMenuSubContent className="w-64">
+              <DropdownMenuLabel className="text-xs text-muted-foreground">
+                계리 예제 — 데이터 + 코드 한 파일
+              </DropdownMenuLabel>
+              {SAMPLE_ACTUARIAL.map((s) => (
+                <DropdownMenuItem key={s.label} onClick={() => void openSampleWorkbook(s)}>
+                  {s.label}
+                </DropdownMenuItem>
+              ))}
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel className="text-xs text-muted-foreground">
+                기본 예제
+              </DropdownMenuLabel>
+              {SAMPLE_BASIC.map((s) => (
+                <DropdownMenuItem key={s.label} onClick={() => void openSampleWorkbook(s)}>
+                  {s.label}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
           <DropdownMenuSeparator />
           <DropdownMenuSub>
             <DropdownMenuSubTrigger>최근 워크북</DropdownMenuSubTrigger>
