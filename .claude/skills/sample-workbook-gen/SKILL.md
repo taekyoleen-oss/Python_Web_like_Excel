@@ -18,6 +18,8 @@ python .claude/skills/sample-workbook-gen/scripts/build_samples.py
 - `freq-severity.pygrid.json` — 빈도·심도(claims 600행): 심도 AIC 비교, 과산포 검정, 순보험료, MC VaR·TVaR.
 - `survival-retention.pygrid.json` — 생존분석·유지율(experience 800행): Kaplan-Meier 자체 구현, 구간 해지율, 로그순위.
 - `chain-ladder.pygrid.json` — 지급준비금(triangle 8×8): 개발계수·완성 삼각형·IBNR·Mack 표준오차.
+- `premium-term.pygrid.json` — 보험료 산출·정기보험(부록 M): 계산기수 → 보험료(원본 검산) → 준비금·해약환급금 → 표준/적용 비교.
+  원본은 `PREMIUM_SRC`(OneDrive 산출과정표 xlsx) — 없으면 생성을 건너뛰고 기존 JSON을 유지한다.
 - `loss-ratio.pygrid.json` · `claim-severity.pygrid.json` — 소형 기본 예제(부록 H.2).
 - `data/snippets.json` — 초보자용 스니펫(기술통계·그룹 집계·피벗·히스토그램·선형회귀·생명표 lx 계산).
 

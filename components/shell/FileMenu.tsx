@@ -80,6 +80,11 @@ const SAMPLE_ACTUARIAL: SampleWorkbook[] = [
     label: "지급준비금 (체인래더)",
     load: async () => chainLadderSample as unknown as Workbook,
   },
+  {
+    // 부록 M — 계산기수 → 보험료 → 준비금·환급금 → 표준/적용 비교
+    label: "보험료 산출 (정기보험)",
+    load: () => dyn(import("@/data/sample-workbooks/premium-term.pygrid.json")),
+  },
 ];
 
 /** 기능 소개용 소형 예제 (부록 H.2) */

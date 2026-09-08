@@ -271,6 +271,14 @@ def _ref_col(ref):
     return n - 1
 
 
+def _si_text(node):
+    """sharedStrings <si> / 인라인 <is> → 텍스트. 후리가나(<rPh>)는 빼야 한다."""
+    parts = [t.text or "" for t in node.findall(NS + "t")]
+    for r in node.findall(NS + "r"):
+        parts += [t.text or "" for t in r.findall(NS + "t")]
+    return "".join(parts)
+
+
 def _read_xlsx_stdlib(path):
     """표준 라이브러리만으로 xlsx 첫 시트를 읽는다(단순 표 전제 — 병합·수식·날짜 없음).
 
@@ -283,7 +291,7 @@ def _read_xlsx_stdlib(path):
         shared = []
         if "xl/sharedStrings.xml" in z.namelist():
             for si in ET.fromstring(z.read("xl/sharedStrings.xml")):
-                shared.append("".join(t.text or "" for t in si.iter(NS + "t")))
+                shared.append(_si_text(si))
         root = ET.fromstring(z.read("xl/worksheets/sheet1.xml"))
         grid = []
         for row in root.iter(NS + "row"):
@@ -293,7 +301,7 @@ def _read_xlsx_stdlib(path):
                 v = c.find(NS + "v")
                 inline = c.find(NS + "is")
                 if t == "inlineStr":
-                    val = "".join(x.text or "" for x in inline.iter(NS + "t")) if inline is not None else None
+                    val = _si_text(inline) if inline is not None else None
                 elif v is None or v.text is None:
                     val = None
                 elif t == "s":
@@ -1059,6 +1067,498 @@ def build_chain_ladder():
     )
 
 
+# ── 부록 M — 보험료 산출 예제 (경영인정기보험 산출과정표) ─────
+
+PREMIUM_SRC = Path(
+    r"C:\Users\tklee\OneDrive - 코리안리재보험\0. 보험료 산출 방법서"
+    r"\경영인정기보험\경영인정기보험 무배당 1504_산출과정표_수정.xlsx"
+)
+
+#: 워크북 `위험률` 시트 열 = (헤더, 원본 위험률 시트 열). B·C는 수식 참조라 제외(부록 M.2)
+RISK_COLS = [
+    ("나이", "A"),
+    ("경험사망률_남", "K"), ("경험사망률_여", "L"),      # 7회 경험생명표 사망률
+    ("표준사망률_남", "M"), ("표준사망률_여", "N"),      # 7회 표준율(표준책임준비금 기초)
+    ("우량체사망률_남", "D"), ("우량체사망률_여", "E"),  # 건강인 할인 기초
+    ("발생률_남", "F"), ("발생률_여", "G"),              # 질병·재해 50%이상 발생률(납입면제)
+    ("표준발생률_남", "H"), ("표준발생률_여", "I"),
+]
+
+DEF_NS = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
+
+
+def _sheet_targets(z):
+    """xlsx zip → {시트명: 워크시트 xml 경로}"""
+    import xml.etree.ElementTree as ET
+
+    rels = {
+        r.get("Id"): r.get("Target")
+        for r in ET.fromstring(z.read("xl/_rels/workbook.xml.rels"))
+    }
+    out = {}
+    for sh in ET.fromstring(z.read("xl/workbook.xml")).iter(NS + "sheet"):
+        t = rels[sh.get(DEF_NS + "id")].lstrip("/")
+        out[sh.get("name")] = t if t.startswith("xl/") else "xl/" + t
+    return out
+
+
+def _read_cells_stdlib(path, names):
+    """표준 라이브러리만으로 지정 시트를 {A1주소: 값}으로 읽는다(수식은 캐시된 값)."""
+    import xml.etree.ElementTree as ET
+    import zipfile
+
+    with zipfile.ZipFile(path) as z:
+        shared = []
+        if "xl/sharedStrings.xml" in z.namelist():
+            for si in ET.fromstring(z.read("xl/sharedStrings.xml")):
+                shared.append(_si_text(si))
+        targets = _sheet_targets(z)
+        out = {}
+        for nm in names:
+            cells = {}
+            for c in ET.fromstring(z.read(targets[nm])).iter(NS + "c"):
+                t = c.get("t", "n")
+                v = c.find(NS + "v")
+                inline = c.find(NS + "is")
+                if t == "inlineStr":
+                    val = _si_text(inline) if inline is not None else None
+                elif v is None or v.text is None:
+                    val = None
+                elif t == "s":
+                    val = shared[int(v.text)]
+                elif t == "b":
+                    val = v.text == "1"
+                elif t in ("str", "e"):
+                    val = v.text
+                else:
+                    val = float(v.text)
+                    if val.is_integer():
+                        val = int(val)
+                if val is not None:
+                    cells[c.get("r")] = val
+            out[nm] = cells
+    return out
+
+
+def read_src_cells(path, names):
+    """원본 xlsx 시트들 → {시트명: {A1주소: 값}}. openpyxl이 없으면 표준 라이브러리 파서."""
+    try:
+        import openpyxl
+    except ImportError:
+        return _read_cells_stdlib(path, names)
+    wb = openpyxl.load_workbook(path, data_only=True)
+    return {
+        nm: {c.coordinate: c.value for row in wb[nm].iter_rows() for c in row if c.value is not None}
+        for nm in names
+    }
+
+
+# 모든 코드 블록이 단독 실행되도록 가정·위험률 로드와 함수 정의를 앞에 붙인다.
+PT_LOAD = '''# ── 가정 시트의 파라미터 — 값을 바꾸고 [전체 실행]하면 이후 모든 단계가 다시 계산된다
+_p = xl("가정!A1:C20", headers=True)
+P = dict(zip(_p["항목"], _p["값"]))
+sex  = int(P["성별"])                       # 1 = 남자, 2 = 여자
+x0   = int(P["가입나이"])                    # 가입나이(세)
+mat  = int(P["만기나이"])                    # 만기나이(세)
+n    = int(P["보험기간"])                    # 보험기간 = 만기나이 − 가입나이
+m    = int(P["납입기간"])                    # 납입기간(년)
+mode = int(P["납입주기"])                    # 12 = 월납
+face = float(P["가입금액"])                  # 가입금액(만원) — 10000 = 1억원
+sa   = float(P["보장금액"])                  # 산출 기준 사망보험금(만원)
+a1, a2 = float(P["α1"]), float(P["α2"])      # 신계약비 α1 = 5%×min(n,20), α2 = 10/1000
+b1, b2 = float(P["β1"]), float(P["β2"])      # 유지비율 β1, 유지비 정액 β2
+bp, gm = float(P["β'"]), float(P["γ"])      # 납입후유지비 β′, 수금비율 γ
+i_app = float(P["예정이율"])                 # 적용(예정)이율
+i_std = float(P["표준이율"])                 # 표준책임준비금 이율
+sc_yr = int(P["해지공제상각기간"])            # 신계약비 상각기간(년)
+
+# ── 위험률 시트(나이 0~112) — 성별에 맞는 열만 골라 나이 인덱스 Series로
+R  = xl("위험률!A1:K114", headers=True).fillna(0.0).astype({"나이": "int64"}).set_index("나이")
+sx = "남" if sex == 1 else "여"
+q_app, f_app = R["경험사망률_" + sx], R["발생률_" + sx]      # 적용 기초 — 7회 경험사망률 + 납입면제 발생률
+q_std, f_std = R["표준사망률_" + sx], R["표준발생률_" + sx]  # 표준 기초 — 7회 표준율
+LAST = int(R.index.max())
+'''
+
+PT_COMM = '''
+
+def commutation(q, f, i):
+    """계산기수표 — 원본 `기수표` 시트 C4:L4 수식을 그대로 옮긴 것."""
+    v = 1.0 / (1.0 + i)
+    t = np.arange(LAST - x0 + 1)                  # t = 0(가입시점) … 위험률 마지막 나이
+    age = x0 + t
+    qq = q.loc[age].to_numpy(float)
+    ff = f.loc[age].to_numpy(float)
+    lx = np.empty(len(t)); llx = np.empty(len(t))
+    lx[0] = llx[0] = 100000.0                     # radix 10만
+    for j in range(len(t) - 1):
+        lx[j + 1]  = lx[j] * (1 - qq[j])                                  # C5: =C4*(1-OFFSET(위험률!$B$5,B4,0))
+        llx[j + 1] = llx[j] * (1 - qq[j] - ff[j] + qq[j] * ff[j] / 2)     # D5: 납입면제까지 감안한 납입자 수
+    dx  = lx * qq                                 # E4: =C4*qx
+    Cx  = dx * v ** (t + 0.5)                     # F4: =E4*v^(A4+0.5)  ← 연중앙 사망 가정
+    Dx  = lx * v ** t                             # I4: =C4*v^A4
+    DLx = llx * v ** t                            # J4: =D4*v^A4
+    rev = lambda a: np.cumsum(a[::-1])[::-1]      # G4: =F4+G5 처럼 아래에서 위로 누적
+    Mx = rev(Cx)
+    return pd.DataFrame({"t": t, "x": age, "lx": lx, "llx": llx, "dx": dx, "Cx": Cx,
+                         "Mx": Mx, "Rx": rev(Mx), "Dx": Dx, "DLx": DLx,
+                         "Nx": rev(Dx), "NLx": rev(DLx)})
+'''
+
+PT_PRICE = '''
+
+def premium(k):
+    """M*·N*[m′] → 순보험료 → α·β·γ 반영 영업보험료 — 원본 `P` 시트."""
+    Mx, Nx, NLx, DLx, Dx = (k[c].to_numpy() for c in ("Mx", "Nx", "NLx", "DLx", "Dx"))
+    M = sa / 1000 * (Mx[0] - Mx[n])                                   # P!A7  M* = (Mx−Mx+n)·보장금액/1000
+    # P!B7  N*[m′] — 월납 보정: m·(NLx−NLx+m) − (m−1)/2·(DLx−DLx+m)
+    N = mode * (NLx[0] - NLx[m] - (mode - 1) / (2 * mode) * (DLx[0] - DLx[m]))
+    base  = M / (NLx[0] - NLx[min(n, 20)])                            # P!C10 기준연납순보험료
+    net   = M / N                                                     # P!C19 순보험료
+    alpha = a1 * round(base, 5) + a2                                  # P!C13 총신계약비(반올림한 기준연납 사용)
+    A = (a1 * base + a2) * Dx[0] / N + b2 / mode                      # P!A13 α·DLx/N*(m′) + β2/m′
+    B = bp * (Nx[m] - Nx[n]) / N                                      # P!B13 β′·(Nx+m−Nx+n)/N*(m′)
+    gross = (net + A + B) / (1 - b1 - gm)                             # P!C22 영업보험료
+    beta_net = (M + bp * (Nx[m] - Nx[n])) / (NLx[0] - NLx[m])         # P!E19 β′ 포함 연납순보험료
+    return dict(M=M, N=N, base=base, net=net, alpha=alpha, A=A, B=B,
+                gross=gross, beta_net=beta_net)
+'''
+
+PT_RESERVE = '''
+
+def reserve(k, beta_net):
+    """연말 책임준비금(10만당) — 원본 `V` 시트 C~I열. (장래 급부 + 납입후유지비 − 장래 수입)/Dx+t"""
+    t = k["t"].to_numpy()
+    Mx, Nx, NLx, Dx = (k[c].to_numpy() for c in ("Mx", "Nx", "NLx", "Dx"))
+    alive = x0 + t <= mat
+    C = np.where(alive, sa / 1000 * (Mx - Mx[n]), 0.0)                # V!C3 장래 사망보험금
+    D = np.where(alive, bp * (Nx[np.maximum(t, m)] - Nx[n]), 0.0)     # V!D3 납입후유지비
+    E = np.where(t <= m, NLx - NLx[m], 0.0)                           # V!E3 장래 보험료의 기수
+    den = np.where(Dx > 0, Dx, 1.0)
+    return np.round(np.where(alive & (Dx > 0), (C + D - beta_net * E) / den, 0.0) * 1e5)
+
+
+def surrender(V10, gross10, alpha10):
+    """해약환급금·환급률 — 원본 `W` 시트 E·F·G·H열."""
+    NC = alpha10 * face / 10                                          # 신계약비(가입금액당)
+    Pf = gross10 * face / 10                                          # 영업보험료 1회 납입액(가입금액당)
+    k7 = min(m, sc_yr)
+    t  = np.arange(len(V10))
+    Vf = V10 * face / 10                                              # W!I6 책임준비금(가입금액당)
+    sc = NC * np.maximum(k7 - t, 0) / k7                              # W!F6 해지공제 = 신계약비 미상각분
+    Wv = np.round(np.maximum(Vf - sc, 0))                             # W!G6 해약환급금
+    SP = np.minimum(t, m) * mode * Pf                                 # W!E6 납입보험료 누계
+    return Vf, sc, Wv, SP, np.divide(Wv, SP, out=np.zeros_like(Wv), where=SP > 0)
+
+
+DUR = sorted({*range(1, 21), 25, 30, 40, 50, n})   # 표에 실을 경과년
+'''
+
+
+def build_premium_term():
+    """부록 M — 계산기수 → 보험료 → 준비금·환급금 → 표준/적용 비교."""
+    if not PREMIUM_SRC.exists():
+        print(f"!! 원본 산출과정표 없음 — 보험료 산출 예제 건너뜀: {PREMIUM_SRC}")
+        return None
+    src = read_src_cells(PREMIUM_SRC, ["위험률", "조회", "P", "V", "W", "(표준)P", "(표준)V"])
+    rk, q, p, sp, Vs, SVs, Ws = (src["위험률"], src["조회"], src["P"], src["(표준)P"],
+                                 src["V"], src["(표준)V"], src["W"])
+
+    # ── 시트 1: 위험률 (나이 0~112 = 원본 A5:W117 중 값이 든 열)
+    rows = [[cell(h, "s") for h, _ in RISK_COLS]]
+    for age in range(113):
+        r = 5 + age
+        rows.append([cell(age, "n")] + [
+            cell(round(float(rk.get(f"{cl}{r}") or 0.0), 10), "n") for _, cl in RISK_COLS[1:]
+        ])
+    risk_sheet = sheet_from_rows("sh-pt-risk", "위험률", rows, row_count=400, col_count=30)
+
+    # ── 시트 2: 가정 (원본 `조회` 시트 파라미터)
+    assume = [
+        ("성별", int(q["C4"]), "1 = 남자, 2 = 여자 — 2로 바꾸면 여성 기초율로 전 단계가 다시 계산된다 (조회!C4)"),
+        ("가입나이", int(q["C5"]), "세 (조회!C5)"),
+        ("만기나이", int(q["C6"]), "세 (조회!C6)"),
+        ("보험기간", int(q["C7"]), "만기나이 − 가입나이 (조회!C7)"),
+        ("납입기간", int(q["C8"]), "년 (조회!C8)"),
+        ("납입주기", int(q["C10"]), "연 납입 횟수. 12 = 월납 (조회!C10)"),
+        ("가입금액", int(q["C9"]), "만원 단위 — 10000 = 1억원 (조회!C9)"),
+        ("보장금액", int(p["B4"]), "산출 기준 사망보험금(만원) (P!B4)"),
+        ("예정이율", float(q["B12"]), "적용이율. v = 1/(1+i) (조회!B12)"),
+        ("표준이율", float(q["D12"]), "표준책임준비금 이율 (조회!D12)"),
+        ("α1", float(q["B14"]), "신계약비율 = 5% × min(보험기간, 20) (조회!B14)"),
+        ("α2", float(q["C14"]), "신계약비 정액 = 10/1000 (조회!C14)"),
+        ("β1", float(q["D14"]), "유지비율 (조회!D14)"),
+        ("β2", float(q["E14"]), "유지비 정액 = 1.5/1000 (조회!E14)"),
+        ("β'", float(q["F14"]), "납입후유지비 = 1/1000 (조회!F14)"),
+        ("γ", float(q["G14"]), "수금비율 (조회!G14)"),
+        ("β*", float(q["H14"]), "플러스보험기간용 — 이 예제에서는 쓰지 않는다 (조회!H14)"),
+        ("β**", float(q["I14"]), "플러스보험기간용 — 이 예제에서는 쓰지 않는다 (조회!I14)"),
+        ("해지공제상각기간", 7, "신계약비 상각기간(년). 실제로는 min(납입기간, 7) (W!F6)"),
+    ]
+    arows = [[cell("항목", "s"), cell("값", "s"), cell("비고", "s")]]
+    arows += [[cell(k, "s"), cell(v, "n"), cell(note, "s")] for k, v, note in assume]
+    assume_sheet = sheet_from_rows("sh-pt-assume", "가정", arows, row_count=60, col_count=10)
+
+    # ── 원본 산출값 (검산 기준값) — 빌드 시점에 원본에서 읽어 코드/마크다운에 박아 둔다
+    r6 = lambda x: round(float(x), 6)
+    REF = [
+        ("M* = (Mx − Mx+n)·보장금액/1000", r6(p["A7"])),
+        ("N*[m′] (월납 보정 납입기수)", r6(p["B7"])),
+        ("기준연납순보험료 10만당", float(p["D10"])),
+        ("순보험료 10만당", float(p["D19"])),
+        ("총신계약비 α 10만당", float(p["D13"])),
+        ("베타순보험료 10만당", float(p["H19"])),
+        ("영업보험료 10만당", float(p["D22"])),
+        ("총납입보험료 10만당", float(p["E22"])),
+        ("영업보험료 가입금액당(1회)", float(q["F8"])),
+    ]
+    ref_lit = "REF = [\n" + "".join(f"    ({a!r}, {b!r}),\n" for a, b in REF) + "]\n"
+    design = (f"{int(q['C5'])}세 {'남자' if int(q['C4']) == 1 else '여자'}"
+              f"·{int(q['C6'])}세 만기·{int(q['C8'])}년납"
+              f"{' 월납' if int(q['C10']) == 12 else ''}")
+    net10, gross10, tot10 = int(p["D19"]), int(p["D22"]), int(p["E22"])
+    snet10, sgross10 = int(sp["D19"]), int(sp["D22"])
+    nc10, snc10 = int(p["D13"]), int(sp["E13"])
+    pay_yr, freq = int(q["C8"]), int(q["C10"])
+    # 원본 V·(표준)V·W 값 (경과년 t → 행 3+t / 5+t)
+    v_ref = {t: int(Vs[f"I{3 + t}"]) for t in (1, 3, 5, 10, 20, 40)}
+    sv_ref = {t: int(SVs[f"I{3 + t}"]) for t in (1, 3, 5, 10, 20, 40)}
+    w_ref = {t: (int(Ws[f"G{5 + t}"]), float(Ws[f"H{5 + t}"])) for t in (1, 2, 3, 5, 10, 20)}
+    wtab = "\n".join(
+        f"| {t} | {w_ref[t][0]:,} | {w_ref[t][1] * 100:.1f}% |" for t in (1, 2, 3, 5, 10, 20))
+    vtab = "\n".join(
+        f"| {t} | {v_ref[t]:,} | {sv_ref[t]:,} | {sv_ref[t] - v_ref[t]:+,} |"
+        for t in (1, 3, 5, 10, 20, 40))
+
+    sid = "sh-pt-risk"
+    core = PT_LOAD + PT_COMM
+    full = core + PT_PRICE + PT_RESERVE
+
+    steps_items = [
+        (2,
+         "1단계 — 계산기수표 (lx·dx·Cx·Mx·Rx·Dx·Nx)",
+         "## 1단계 — 계산기수표 (lx·dx·Cx·Mx·Rx·Dx·Nx)\n\n"
+         "사망률 `qx`에서 **계산기수**를 만듭니다. 원본 `기수표` 시트의 수식을 그대로 옮긴 것입니다.\n\n"
+         "| 기수 | 뜻 | 원본 엑셀 수식 |\n|---|---|---|\n"
+         "| `lx` | 생존자 수(radix 100,000) | `C5: =C4*(1-OFFSET(위험률!$B$5,B4,0))` |\n"
+         "| `llx` | **납입자 수** — 사망 + 납입면제(질병·재해 50%이상) 탈퇴 | `D5: =D4*(1-qx-fx+qx*fx/2)` |\n"
+         "| `dx` | 사망자 수 | `E4: =C4*OFFSET(위험률!$B$5,B4,0)` |\n"
+         "| `Cx` | 사망보험금 현가 | `F4: =E4*v^(A4+0.5)` — **연중앙 사망** 가정 |\n"
+         "| `Mx` | ΣCx (아래에서 위로 누적) | `G4: =F4+G5` |\n"
+         "| `Rx` | ΣMx | `H4: =G4+H5` |\n"
+         "| `Dx`·`DLx` | 생존/납입자 현가 | `I4: =C4*v^A4`, `J4: =D4*v^A4` |\n"
+         "| `Nx`·`NLx` | ΣDx, ΣDLx | `K4: =I4+K5`, `L4: =J4+L5` |\n\n"
+         "원본은 `OFFSET(기수표!$G$4, 보험기간, 0)`으로 `Mx+n`을 집었지만, 여기서는 `Mx[n]`처럼 **위치 인덱싱**으로 옮겼습니다.\n"
+         "`t = 0`이 가입시점(나이 = 가입나이)입니다.",
+         "계산기수표",
+         core + '''
+k = commutation(q_app, f_app, i_app)          # 적용 기초(7회 경험사망률 + 예정이율)
+out = k.copy()
+for c in ("lx", "llx", "dx", "Cx", "Mx", "Rx", "Dx", "DLx", "Nx", "NLx"):
+    out[c] = out[c].round(4)
+print(f"v = 1/(1+{i_app}) = {1 / (1 + i_app):.10f} · {x0}세 가입 · 기수표 {len(out)}행 (t = 0 … {len(out) - 1})")
+out''',
+         "values"),
+        (90,
+         "2단계 — 보험료 (순보험료 → 영업보험료) · 원본 검산",
+         "## 2단계 — 보험료 (순보험료 → 영업보험료) · 원본 검산\n\n"
+         "1단계 기수로 보험료를 만듭니다.\n\n"
+         "- **M\\*** = `(Mx − Mx+n) × 보장금액/1000` — 원본 `P!A7`\n"
+         "- **N\\*[m′]** = `m·(NLx − NLx+m) − (m−1)/2·(DLx − DLx+m)` — 원본 `P!B7`. "
+         "월납이라 연납 기수를 **납입주기 보정**합니다(연 12회, 평균 반년 앞당겨 받는 효과).\n"
+         "- **순보험료** = `M* / N*[m′]` — 원본 `P!C19`\n"
+         "- **영업보험료** = `(순보험료 + α항 + β′항) / (1 − β1 − γ)` — 원본 `P!C22`\n"
+         "  - α항 `P!A13` = `(α1·기준연납순보험료 + α2)·Dx/N*[m′] + β2/m′`\n"
+         "  - β′항 `P!B13` = `β′·(Nx+m − Nx+n)/N*[m′]`\n\n"
+         "> 신계약비 α는 **반올림한(소수 5자리) 기준연납순보험료**로 계산합니다(원본 `P!C13`의 `ROUND`). "
+         "반올림 위치가 다르면 10만당 값이 1원씩 어긋납니다.\n\n"
+         "원본 산출과정표의 최종값 — 순보험료 10만당 **" + f"{net10}" + "원**, 영업보험료 10만당 **" + f"{gross10}"
+         + "원**, 총납입보험료 10만당 **" + f"{tot10:,}" + "원**(= " + f"{gross10} × {pay_yr}년 × {freq}회"
+         + ").\n아래 코드가 같은 값을 다시 계산해 **차이** 열로 대조합니다(차이 0이면 원본과 완전히 일치).\n\n"
+         "> `원본(엑셀)` 열은 **기본 설계**(" + design + ") 기준으로 박아 둔 값입니다. "
+         "`가정` 시트를 고치면 차이가 벌어지는 것이 정상입니다 — 검산은 기본 설계로 되돌린 뒤 보세요.",
+         "보험료 산출 · 원본 대조표",
+         full + "\n" + ref_lit + '''
+k  = commutation(q_app, f_app, i_app)
+pr = premium(k)
+g10 = round(pr["gross"] * 1e5)                 # 영업보험료 10만당(원 단위 반올림)
+calc = [pr["M"], pr["N"], round(pr["base"] * 1e5), round(pr["net"] * 1e5),
+        round(pr["alpha"] * 1e5), round(pr["beta_net"] * 1e5), g10,
+        g10 * m * mode, g10 * face / 10]
+chk = pd.DataFrame({"항목": [a for a, _ in REF],
+                    "원본(엑셀)": [b for _, b in REF],
+                    "계산값": [round(float(x), 6) for x in calc]})
+chk["차이"] = (chk["계산값"] - chk["원본(엑셀)"]).round(6)
+print("최대 차이:", chk["차이"].abs().max())
+chk''',
+         "values"),
+        (105,
+         "3단계 — 책임준비금·해약환급금",
+         "## 3단계 — 책임준비금·해약환급금\n\n"
+         "**연말 책임준비금** `tV`는 장래법으로, 원본 `V` 시트와 같은 분해를 씁니다.\n\n"
+         "```\n"
+         "tV = ( (Mx+t − Mx+n)·보장금액/1000        ← 장래 사망보험금 (V!C3)\n"
+         "     + β′·(Nx+max(t,m) − Nx+n)            ← 납입후유지비     (V!D3)\n"
+         "     − 베타순보험료·(NLx+t − NLx+m) )      ← 장래 보험료 수입 (V!E3·F3)\n"
+         "     / Dx+t\n"
+         "```\n\n"
+         "**해약환급금**은 준비금에서 미상각 신계약비(해지공제)를 뺀 값입니다 — 원본 `W` 시트.\n\n"
+         "- 해지공제 `W!F6` = `신계약비 × max(min(납입기간,7) − 경과년, 0) / min(납입기간,7)` → 7년에 걸쳐 0으로 상각\n"
+         "- 해약환급금 `W!G6` = `max(책임준비금 − 해지공제, 0)`\n"
+         "- 환급률 `W!H6` = `해약환급금 / 납입보험료 누계`\n\n"
+         "신계약비는 `조회!H5 = MIN(P!D13, '(표준)P'!E13)` — 적용·표준 중 **작은 쪽**(" + f"{min(nc10, snc10):,}"
+         + "원/10만당)을 씁니다.\n\n"
+         "원본 값(가입금액 1억원 기준):\n\n"
+         "| 경과년 | 해약환급금(원) | 환급률 |\n|---|---|---|\n" + wtab + "\n\n"
+         "> 초기 환급률이 낮은 것은 해지공제 때문입니다 — 7년이 지나면 해지공제가 0이 되어 준비금이 그대로 환급금이 됩니다.",
+         "경과년별 준비금 · 환급금 표",
+         full + '''
+k  = commutation(q_app, f_app, i_app)
+pr = premium(k)
+V10 = reserve(k, pr["beta_net"])                                    # 10만당 책임준비금
+g10 = round(pr["gross"] * 1e5)
+# 신계약비는 적용·표준 중 작은 쪽 (조회!H5 = MIN(P!D13, '(표준)P'!E13))
+a10 = min(round(pr["alpha"] * 1e5),
+          round(premium(commutation(q_std, f_std, i_std))["alpha"] * 1e5))
+Vf, sc, Wv, SP, rate = surrender(V10, g10, a10)
+pd.DataFrame({"경과년": DUR,
+              "준비금(10만당)": V10[DUR],
+              "책임준비금": Vf[DUR],
+              "해지공제": np.round(sc[DUR]),
+              "해약환급금": Wv[DUR],
+              "납입보험료누계": SP[DUR],
+              "환급률": np.round(rate[DUR], 4)})''',
+         "values"),
+        (136,
+         "4단계 — 환급률 곡선",
+         "## 4단계 — 환급률 곡선\n\n"
+         "경과년에 따라 환급률이 어떻게 올라오는지 봅니다. 왼쪽은 **환급률**(100% 기준선 표시), "
+         "오른쪽은 **납입보험료 누계 · 책임준비금 · 해약환급금**을 금액으로 겹쳐 그린 것입니다.\n\n"
+         "- 초기 몇 해는 해지공제(미상각 신계약비)가 준비금을 넘어 환급금이 **0**입니다.\n"
+         "- 해지공제가 사라지는 " + f"{min(pay_yr, 7)}" + "년차부터 환급금 = 책임준비금이 됩니다.\n"
+         "- 납입이 끝나는 " + f"{pay_yr}" + "년차 이후에는 납입누계가 고정되므로 환급률이 100%를 넘어갑니다.",
+         "환급률 · 금액 곡선",
+         full + '''
+import matplotlib.pyplot as plt
+k  = commutation(q_app, f_app, i_app)
+pr = premium(k)
+V10 = reserve(k, pr["beta_net"])
+g10 = round(pr["gross"] * 1e5)
+a10 = min(round(pr["alpha"] * 1e5),
+          round(premium(commutation(q_std, f_std, i_std))["alpha"] * 1e5))
+Vf, sc, Wv, SP, rate = surrender(V10, g10, a10)
+t = np.arange(1, n + 1)
+fig, ax = plt.subplots(1, 2, figsize=(10.5, 3.8))
+ax[0].plot(t, rate[t] * 100, color="#4A90C2", lw=1.6)
+ax[0].axhline(100, color="#999", lw=1, ls="--")
+ax[0].axvline(min(m, sc_yr), color="#C2704A", lw=1, ls=":")
+ax[0].set_title("경과년별 환급률 (%)"); ax[0].set_xlabel("경과년"); ax[0].grid(alpha=0.3)
+ax[1].plot(t, SP[t] / 1e4, label="납입보험료 누계", color="#8A8A8A")
+ax[1].plot(t, Vf[t] / 1e4, label="책임준비금", color="#4A90C2")
+ax[1].plot(t, Wv[t] / 1e4, label="해약환급금", color="#C2704A")
+ax[1].set_title("금액 비교 (만원)"); ax[1].set_xlabel("경과년")
+ax[1].grid(alpha=0.3); ax[1].legend(fontsize=8)
+fig.tight_layout()
+fig''',
+         "object"),
+        (144,
+         "5단계 — 표준 vs 적용 비교",
+         "## 5단계 — 표준 vs 적용 비교\n\n"
+         "**표준책임준비금**은 회사가 실제로 쓰는 가정(적용 기초)과 무관하게 **감독당국이 정한 기초**"
+         "(표준이율 + 표준위험률)로 다시 계산한 준비금입니다. 회사가 낙관적인 가정으로 준비금을 적게 쌓는 것을 막는 "
+         "**하한선**이며, 재무제표에는 적용·표준 중 큰 쪽을 적립합니다.\n\n"
+         "이 예제에서는 적용이율 **" + f"{float(q['B12']) * 100:.2f}%" + "** · 7회 경험사망률과 "
+         "표준이율 **" + f"{float(q['D12']) * 100:.2f}%" + "** · 7회 표준율을 나란히 계산합니다. "
+         "표준 쪽은 이율이 낮고(할인이 약해 현가가 커짐) 위험률이 보수적이라 준비금이 더 큽니다.\n\n"
+         "원본 값(10만당):\n\n"
+         "| 경과년 | 적용 준비금 | 표준 준비금 | 차이 |\n|---|---|---|---|\n" + vtab + "\n\n"
+         "보험료도 같이 대조합니다 — 순보험료 10만당 적용 **" + f"{net10}" + "** vs 표준 **" + f"{snet10}" + "**, "
+         "영업보험료 적용 **" + f"{gross10}" + "** vs 표준 **" + f"{sgross10}" + "**.\n\n"
+         "> 원본은 `(표준)기수표`·`(표준)P`·`(표준)V` 시트를 따로 두었지만, 여기서는 같은 함수에 "
+         "**기초율과 이율만 바꿔** 넣습니다.",
+         "표준·적용 준비금 비교표",
+         full + '''
+kA, kS = commutation(q_app, f_app, i_app), commutation(q_std, f_std, i_std)   # 적용 / 표준 기초
+pA, pS = premium(kA), premium(kS)
+VA, VS = reserve(kA, pA["beta_net"]), reserve(kS, pS["beta_net"])
+for nm, key in (("순보험료", "net"), ("영업보험료", "gross"), ("기준연납순보험료", "base"),
+                ("총신계약비 α", "alpha"), ("베타순보험료", "beta_net")):
+    print(f"{nm:16s} 10만당  적용 {round(pA[key] * 1e5):>6,}   표준 {round(pS[key] * 1e5):>6,}")
+diff = VS[DUR] - VA[DUR]
+pd.DataFrame({"경과년": DUR, "적용준비금": VA[DUR], "표준준비금": VS[DUR],
+              "차이(표준−적용)": diff,
+              "차이율(%)": np.round(np.divide(diff, VA[DUR], out=np.zeros_like(diff),
+                                              where=VA[DUR] > 0) * 100, 2)})''',
+         "values"),
+        (176,
+         "6단계 — 표준·적용 차이 그래프",
+         "## 6단계 — 표준·적용 차이 그래프\n\n"
+         "왼쪽은 두 기초의 준비금 곡선, 오른쪽은 **표준 − 적용** 차이를 경과년별 막대로 그린 것입니다.\n"
+         "차이는 납입기간 부근에서 가장 크고 만기에 가까워지면 다시 좁아집니다 — "
+         "만기에는 두 기초 모두 준비금이 0으로 수렴하기 때문입니다.",
+         "준비금 곡선 · 차이 막대",
+         full + '''
+import matplotlib.pyplot as plt
+kA, kS = commutation(q_app, f_app, i_app), commutation(q_std, f_std, i_std)
+VA = reserve(kA, premium(kA)["beta_net"])
+VS = reserve(kS, premium(kS)["beta_net"])
+t = np.arange(0, n + 1)
+fig, ax = plt.subplots(1, 2, figsize=(10.5, 3.8))
+ax[0].plot(t, VA[t], label=f"적용 {i_app * 100:.2f}%", color="#4A90C2")
+ax[0].plot(t, VS[t], label=f"표준 {i_std * 100:.2f}%", color="#C2704A")
+ax[0].set_title("책임준비금 (10만당)"); ax[0].set_xlabel("경과년")
+ax[0].grid(alpha=0.3); ax[0].legend(fontsize=8)
+ax[1].bar(t, VS[t] - VA[t], color="#4A90C2")
+ax[1].set_title("표준 − 적용 (10만당)"); ax[1].set_xlabel("경과년"); ax[1].grid(alpha=0.3)
+fig.tight_layout()
+fig''',
+         "object"),
+    ]
+
+    blocks = steps(sid, 12, "pt",
+                   ("보험료 산출 — 정기보험",
+                    "# 보험료 산출 — 정기보험\n\n"
+                    "실제 보험료 산출과정표(경영인정기보험 무배당 1504)의 위험률과 파라미터를 그대로 담았습니다. "
+                    "**계산기수 → 보험료 → 준비금·해약환급금 → 표준/적용 비교**가 이 한 파일에서 닫힙니다.\n\n"
+                    "**구성**\n\n"
+                    "- `위험률` 시트 — 나이 0~112세의 7회 경험사망률·표준사망률·우량체사망률과 "
+                    "납입면제(질병·재해 50%이상) 발생률 (원본 `위험률` 시트 A5:W117 중 값이 든 열)\n"
+                    "- `가정` 시트 — 성별·가입나이·보험기간·납입기간·가입금액·예정이율·표준이율과 사업비율 "
+                    "α1·α2·β1·β2·β′·γ (원본 `조회` 시트)\n"
+                    "- 오른쪽 M열부터 6단계의 [설명 + 코드] 블록\n\n"
+                    "**읽는 법** — 설명을 읽고 코드 블록을 순서대로 실행하거나, 그냥 **[전체 실행]**을 누르세요. "
+                    "각 블록은 `xl()`로 시트를 다시 읽어 단독 실행됩니다. 설명에는 원본 엑셀 수식을 그대로 인용해 두었으니 "
+                    "코드와 나란히 대조해 보세요.\n\n"
+                    "> 현재 설계: **" + f"{int(q['C5'])}세 남자 · {int(q['C6'])}세 만기 · {pay_yr}년납 월납 · "
+                    f"가입금액 {int(q['C9']) // 10000}억원" + "**"),
+                   steps_items)
+    blocks.append(md_block(
+        "blk-pt-wrap", sid, 184, 12,
+        "## 정리 — 무엇을 바꾸면 무엇이 바뀌나\n\n"
+        "모든 단계는 `가정` 시트만 보고 계산합니다. 값을 고치고 **[전체 실행]**을 누르면 "
+        "1단계 기수표부터 6단계 그래프까지 한 번에 다시 만들어집니다.\n\n"
+        "| 바꾸는 값 | 일어나는 일 |\n|---|---|\n"
+        "| `성별` 1 → 2 | 여성 기초율로 전 단계가 재계산 — 사망률이 낮아 보험료·준비금이 내려갑니다 |\n"
+        "| `가입나이` | 기수표의 시작 나이가 바뀌어 보험료가 크게 움직입니다(고연령일수록 급증) |\n"
+        "| `만기나이` | `보험기간`도 같이 고쳐야 합니다 (보험기간 = 만기나이 − 가입나이) |\n"
+        "| `납입기간` | N\\*[m′]와 해지공제 상각기간 min(납입기간, 7)이 함께 바뀝니다 |\n"
+        "| `예정이율` | 올리면 할인이 커져 보험료·준비금이 내려갑니다 |\n"
+        "| `표준이율` | 5·6단계의 표준 쪽만 움직입니다(적용 결과는 그대로) |\n"
+        "| `α1`·`α2`·`β1`·`β2`·`β′`·`γ` | 순보험료는 그대로, 영업보험료와 해지공제(신계약비)가 바뀝니다 |\n\n"
+        "**주의** — 원본 `조회` 시트에서 수식으로 이어져 있던 두 값은 여기서 **고정값**입니다 — 같이 고쳐야 합니다.\n\n"
+        "- `보험기간` = 만기나이 − 가입나이 (원본 `조회!C7`)\n"
+        "- `α1` = 5% × min(보험기간, 20) (원본 `조회!B14`)\n\n"
+        "2단계의 **차이** 열이 모두 0이면 원본 산출과정표와 완전히 일치한다는 뜻입니다.",
+        "정리 — 무엇을 바꾸면 무엇이 바뀌나"))
+
+    return workbook(
+        "wb-sample-premium-term",
+        "보험료 산출 — 정기보험(계산기수·준비금)",
+        [risk_sheet, assume_sheet],
+        blocks,
+    )
+
+
 # ── 스니펫 ───────────────────────────────────────────────
 
 SNIPPET_LIST = [
@@ -1126,6 +1626,16 @@ def selfcheck_xlsx():
         return
     for name in ("mortality_table", "triangle"):
         assert read_xlsx(name) == _read_xlsx_stdlib(XLSX_DIR / f"{name}.xlsx"), name
+    if PREMIUM_SRC.exists():
+        names = ["조회", "P"]
+        a = read_src_cells(PREMIUM_SRC, names)
+        b = _read_cells_stdlib(PREMIUM_SRC, names)
+        for nm in names:
+            for addr, v in b[nm].items():
+                if isinstance(v, (int, float)) and not isinstance(v, bool):
+                    assert abs(a[nm][addr] - v) < 1e-9, (nm, addr, a[nm][addr], v)
+                else:
+                    assert a[nm][addr] == v, (nm, addr)
     print("xlsx 파서 자립성 확인 (openpyxl == 표준 라이브러리)")
 
 
@@ -1141,7 +1651,11 @@ def main():
         (build_freq_severity(), "freq-severity.pygrid.json"),
         (build_survival(), "survival-retention.pygrid.json"),
         (build_chain_ladder(), "chain-ladder.pygrid.json"),
+        # 부록 M — 보험료 산출 예제 (원본 산출과정표가 있을 때만)
+        (build_premium_term(), "premium-term.pygrid.json"),
     ]:
+        if wb is None:
+            continue
         (SAMPLES / fname).write_text(
             json.dumps(wb, ensure_ascii=False, indent=1), encoding="utf-8"
         )
