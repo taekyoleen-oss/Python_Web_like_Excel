@@ -1,21 +1,18 @@
 "use client";
 
-// 그리드 툴바 — 행/열 삽입·삭제, 열 고정, 정렬 + 후속 마일스톤 자리표시 버튼
+// 그리드 툴바 — 시트 편집 전용(붙여넣기·행/열·열 고정·정렬·서식).
+// 양 끝은 좌우 패널 접기: 왼쪽 끝 스프레드시트, 오른쪽 끝 Python 패널.
+// Python 조작(블록 추가·전체 실행·계산 모드·목차/AI)은 PythonPanel 헤더에 있다.
 
 import { useEffect, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import {
-  Article,
-  ChatCircleText,
   ClipboardText,
   Code,
-  ListBullets,
   Play,
-  Plus,
   PushPin,
   SortAscending,
   SortDescending,
-  Stop,
   Table,
   TextB,
 } from "@phosphor-icons/react";
@@ -36,17 +33,10 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { setCalcModeEverywhere } from "@/lib/grid/calc-host";
 import type { DateOrder } from "@/lib/grid/clipboard/infer";
 import { parseClipboard } from "@/lib/grid/clipboard/parse";
 import { isRangeBold, useWorkbookStore, type CellEdit } from "@/lib/grid/model";
-import {
-  addBlockAtSelection,
-  addMarkdownAtSelection,
-  runAllBlocks,
-} from "@/lib/grid/run-block";
-import { getRuntimeClient } from "@/lib/runtime/client";
-import type { CalcMode } from "@/types/workbook";
+import { runAllBlocks } from "@/lib/grid/run-block";
 import {
   Select,
   SelectContent,
@@ -156,7 +146,8 @@ export function togglePanelCollapse(panel: "grid" | "python", next?: boolean): v
   void saveSettings({ gridCollapsed, pyCollapsed });
 }
 
-function ToolButton({
+/** 아이콘 전용 툴 버튼 + 툴팁 — 그리드 툴바와 Python 패널 헤더 공용 */
+export function ToolButton({
   label,
   onClick,
   disabled,
@@ -271,7 +262,6 @@ export default function GridToolbar() {
     (s) => s.workbook.sheets.find((sh) => sh.id === s.activeSheetId)?.frozenCols ?? 0,
   );
   const [pasteDialogOpen, setPasteDialogOpen] = useState(false);
-  const calcMode = useWorkbookStore((s) => s.workbook.calcMode);
   // 부록 J.2: 선택 전체가 굵으면 토글은 해제로 동작
   const selectionBold = useWorkbookStore((s) => {
     if (!s.selection) return false;
@@ -285,8 +275,6 @@ export default function GridToolbar() {
     const fs = sel && sheet ? sheet.cells[cellKey(sel.r0, sel.c0)]?.st?.fs : undefined;
     return fs ? String(fs) : "default";
   });
-  const tocOpen = useWorkbookStore((s) => s.tocOpen);
-  const aiChatOpen = useWorkbookStore((s) => s.aiChatOpen);
   const gridCollapsed = useWorkbookStore((s) => s.gridCollapsed);
   const pyCollapsed = useWorkbookStore((s) => s.pyCollapsed);
 
@@ -303,7 +291,22 @@ export default function GridToolbar() {
   };
 
   return (
-    <div className="flex h-10 shrink-0 items-center gap-1 border-b bg-muted/40 px-2">
+    <div
+      data-testid="grid-toolbar"
+      className="flex h-10 shrink-0 items-center gap-1 border-b bg-muted/40 px-2"
+    >
+      {/* 패널 접기 — 1024px 미만은 탭 전환 UI라 접기 개념이 없다 (lg:contents = 레이아웃 무영향) */}
+      <span className="hidden lg:contents">
+        <ToolButton
+          label={gridCollapsed ? "스프레드시트 보이기 (Ctrl+Alt+1)" : "스프레드시트 감추기 (Ctrl+Alt+1)"}
+          active={gridCollapsed}
+          onClick={() => togglePanelCollapse("grid")}
+        >
+          <Table />
+        </ToolButton>
+        <Separator orientation="vertical" className="mx-1 h-5" />
+      </span>
+
       <ToolButton label="붙여넣기 옵션 (텍스트로 붙여넣기)" onClick={() => setPasteDialogOpen(true)}>
         <ClipboardText />
       </ToolButton>
@@ -375,23 +378,26 @@ export default function GridToolbar() {
           ))}
         </SelectContent>
       </Select>
-      <Separator orientation="vertical" className="mx-1 h-5" />
 
-      <ToolButton label="Python 블록 추가 (Ctrl+Shift+P)" onClick={addBlockAtSelection}>
-        <Plus className="text-primary" />
-      </ToolButton>
-      <ToolButton label="마크다운 블록 추가" onClick={addMarkdownAtSelection}>
-        <Article />
-      </ToolButton>
-      {/* 패널 접기 — 1024px 미만은 탭 전환 UI라 접기 개념이 없다 (lg:contents = 레이아웃 무영향) */}
-      <span className="hidden lg:contents">
-        <ToolButton
-          label={gridCollapsed ? "스프레드시트 보이기 (Ctrl+Alt+1)" : "스프레드시트 감추기 (Ctrl+Alt+1)"}
-          active={gridCollapsed}
-          onClick={() => togglePanelCollapse("grid")}
-        >
-          <Table />
-        </ToolButton>
+      {/* Python 패널 접기 — 툴바 오른쪽 끝 (스프레드시트 접기와 좌·우로 마주본다) */}
+      <span className="ml-auto hidden items-center gap-1 lg:flex">
+        {/* 패널이 접혀 있으면 ▶ 전체 실행만 여기로 되돌아온다 — 접힌 채로도 재계산 가능 */}
+        {pyCollapsed && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="default"
+                size="icon"
+                className="size-8"
+                onClick={() => void runAllBlocks()}
+                aria-label="전체 실행"
+              >
+                <Play weight="fill" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>전체 실행 — 계산 순서대로 모든 블록</TooltipContent>
+          </Tooltip>
+        )}
         <ToolButton
           label={pyCollapsed ? "Python 패널 보이기 (Ctrl+Alt+2)" : "Python 패널 감추기 (Ctrl+Alt+2)"}
           active={pyCollapsed}
@@ -400,57 +406,6 @@ export default function GridToolbar() {
           <Code />
         </ToolButton>
       </span>
-      <ToolButton
-        label={tocOpen ? "목차 패널 닫기" : "목차 패널 열기"}
-        active={tocOpen}
-        onClick={() => {
-          store().setTocOpen(!tocOpen);
-          void saveSettings({ tocOpen: !tocOpen });
-        }}
-      >
-        <ListBullets />
-      </ToolButton>
-      {/* 부록 G.2: AI 채팅 패널 토글 (TocPanel과 같은 패턴) */}
-      <ToolButton
-        label={aiChatOpen ? "AI 채팅 패널 닫기" : "AI 채팅 패널 열기"}
-        active={aiChatOpen}
-        onClick={() => {
-          store().setAiChatOpen(!aiChatOpen);
-          void saveSettings({ aiChatOpen: !aiChatOpen });
-        }}
-      >
-        <ChatCircleText />
-      </ToolButton>
-      {/* 실행 버튼은 --primary 채움 (§4.6 Button) */}
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            variant="default"
-            size="icon"
-            className="size-8"
-            onClick={() => void runAllBlocks()}
-            aria-label="전체 실행"
-          >
-            <Play weight="fill" />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>전체 실행 — 계산 순서대로 모든 블록</TooltipContent>
-      </Tooltip>
-      <ToolButton label="실행 중단" onClick={() => getRuntimeClient().interrupt()}>
-        <Stop />
-      </ToolButton>
-      <Select
-        value={calcMode}
-        onValueChange={(v) => setCalcModeEverywhere(v as CalcMode)}
-      >
-        <SelectTrigger className="h-7 w-28 text-xs" aria-label="계산 모드">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="auto">계산: 자동</SelectItem>
-          <SelectItem value="manual">계산: 수동</SelectItem>
-        </SelectContent>
-      </Select>
     </div>
   );
 }

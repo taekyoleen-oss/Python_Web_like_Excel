@@ -1,19 +1,44 @@
 "use client";
 
-// Python 패널 — 블록 목록(계산 순서) + 스니펫·초기화 스크립트 + 참조 삽입 바 (§2.3.2).
+// Python 패널 — 헤더(블록 추가·전체 실행·중단·계산 모드·목차/AI 토글) + 블록 목록(계산 순서)
+// + 스니펫·초기화 스크립트 + 참조 삽입 바 (§2.3.2).
+// Python 조작은 전부 이 패널 헤더에 있다 — 그리드 툴바는 시트 편집 + 좌우 패널 접기 전용.
 // 목차는 전용 패널(TocPanel)로 분리되었다 (부록 D.2).
 
 import { useMemo } from "react";
+import { Article, ChatCircleText, ListBullets, Play, Plus, Stop } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { ToolButton } from "@/components/grid/GridToolbar";
 import { AiGenerateBar } from "@/components/python/AiAssist";
 import InitScriptDialog from "@/components/python/InitScriptDialog";
 import PyBlockCard from "@/components/python/PyBlockCard";
 import SnippetInsertDialog from "@/components/python/SnippetInsertDialog";
 import SnippetMenu from "@/components/python/SnippetMenu";
 import { editorRegistry } from "@/components/python/CodeEditor";
-import { blocksInOrder } from "@/lib/grid/run-block";
+import { setCalcModeEverywhere } from "@/lib/grid/calc-host";
+import {
+  addBlockAtSelection,
+  addMarkdownAtSelection,
+  blocksInOrder,
+  runAllBlocks,
+} from "@/lib/grid/run-block";
 import { useWorkbookStore } from "@/lib/grid/model";
 import { xlRefForSelection } from "@/lib/grid/xl-ref";
+import { getRuntimeClient } from "@/lib/runtime/client";
+import { saveSettings } from "@/lib/storage/db";
+import type { CalcMode } from "@/types/workbook";
 
 function RefInsertBar() {
   const selection = useWorkbookStore((s) => s.selection);
@@ -41,14 +66,81 @@ function RefInsertBar() {
 export default function PythonPanel() {
   const workbook = useWorkbookStore((s) => s.workbook);
   const blocks = useMemo(() => blocksInOrder(workbook), [workbook]);
+  const calcMode = useWorkbookStore((s) => s.workbook.calcMode);
+  const tocOpen = useWorkbookStore((s) => s.tocOpen);
+  const aiChatOpen = useWorkbookStore((s) => s.aiChatOpen);
 
   const allCollapsed = blocks.length > 0 && blocks.every((b) => b.collapsed);
 
   return (
     <div className="flex h-full flex-col border-l bg-code-bg">
-      <div className="flex items-center gap-2 border-b px-2 py-1.5">
+      {/* Python 조작은 전부 이 헤더에 모인다. 좁은 패널에서는 아이콘 전용 + 줄바꿈(flex-wrap)으로 흘린다 */}
+      <div
+        data-testid="python-panel-header"
+        className="flex flex-wrap items-center gap-x-0.5 gap-y-0.5 border-b px-2 py-1"
+      >
         <span className="text-xs font-medium">블록</span>
-        <span className="text-xs text-muted-foreground">{blocks.length}</span>
+        <span className="mr-1 text-xs text-muted-foreground">{blocks.length}</span>
+
+        <ToolButton label="Python 블록 추가 (Ctrl+Shift+P)" onClick={addBlockAtSelection}>
+          <Plus className="text-primary" />
+        </ToolButton>
+        <ToolButton label="마크다운 블록 추가" onClick={addMarkdownAtSelection}>
+          <Article />
+        </ToolButton>
+        {/* 실행 버튼은 --primary 채움 (§4.6 Button) */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="default"
+              size="icon"
+              className="ml-1 size-8"
+              onClick={() => void runAllBlocks()}
+              aria-label="전체 실행"
+            >
+              <Play weight="fill" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>전체 실행 — 계산 순서대로 모든 블록</TooltipContent>
+        </Tooltip>
+        <ToolButton label="실행 중단" onClick={() => getRuntimeClient().interrupt()}>
+          <Stop />
+        </ToolButton>
+        <Select value={calcMode} onValueChange={(v) => setCalcModeEverywhere(v as CalcMode)}>
+          <SelectTrigger
+            className="ml-0.5 mr-1 h-7 w-16 text-xs"
+            aria-label="계산 모드"
+            title="계산 모드"
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="auto">자동</SelectItem>
+            <SelectItem value="manual">수동</SelectItem>
+          </SelectContent>
+        </Select>
+        <ToolButton
+          label={tocOpen ? "목차 패널 닫기" : "목차 패널 열기"}
+          active={tocOpen}
+          onClick={() => {
+            useWorkbookStore.getState().setTocOpen(!tocOpen);
+            void saveSettings({ tocOpen: !tocOpen });
+          }}
+        >
+          <ListBullets />
+        </ToolButton>
+        {/* 부록 G.2: AI 채팅 패널 토글 */}
+        <ToolButton
+          label={aiChatOpen ? "AI 채팅 패널 닫기" : "AI 채팅 패널 열기"}
+          active={aiChatOpen}
+          onClick={() => {
+            useWorkbookStore.getState().setAiChatOpen(!aiChatOpen);
+            void saveSettings({ aiChatOpen: !aiChatOpen });
+          }}
+        >
+          <ChatCircleText />
+        </ToolButton>
+
         <div className="ml-auto flex items-center">
           {blocks.length > 0 && (
             <Button
