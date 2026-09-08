@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-// 부록 G.2·G.3: AI 채팅 패널 — 토글·키 유도·모킹 응답의 코드 카드 → 블록 반영 ·
+// 부록 G.2·G.3 (+L 통합 후): AI 채팅 패널 — 토글·키 유도·모킹 응답의 코드 카드 → 블록 반영 ·
 // 지침 펜스 → 확인 카드 [반영] → 지침 편집에 반영 · 대화 유지(닫았다 열기).
 // 실제 Anthropic API는 호출하지 않는다 (page.route 모킹).
 
@@ -61,7 +61,7 @@ test("AI 채팅: 토글 → 키 유도 → 코드 카드 → 블록 반영 → �
   expect(sentBody).toContain("시트기반 파이썬");
   expect(sentBody).toContain("앱 규칙이 우선");
   expect(sentBody).toContain("보험·계리"); // 기본 지침 시드
-  expect(sentBody).toContain("[컨텍스트(JSON)]");
+  expect(sentBody).toContain("[워크북 개요]"); // 값 미포함 개요만 (값은 read_range 도구로)
 
   // ── 코드 카드 → 아래 새 블록으로 (자동 실행 없음)
   await codeCard.getByRole("button", { name: "아래 새 블록으로" }).click();

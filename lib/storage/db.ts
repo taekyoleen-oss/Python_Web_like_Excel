@@ -1,6 +1,7 @@
 // IndexedDB 래퍼 — 실패 시 메모리 Map으로 강등, 워크북 LRU 최대 20개
 
 import { openDB, type IDBPDatabase } from "idb";
+import type { ChatMessage } from "@/lib/ai/chat";
 import type { Workbook } from "@/types/workbook";
 
 export interface AppSettings {
@@ -34,7 +35,7 @@ export interface AppSettings {
   /** AI 채팅 패널 열림 (부록 G.2, 기본 false) */
   aiChatOpen?: boolean;
   /** AI 채팅 이력 — 로컬 전용, 워크북 파일 미포함. 최대 200개(저장 시 캡) */
-  aiChatHistory?: { role: "user" | "assistant"; content: string }[];
+  aiChatHistory?: ChatMessage[];
   /** AI 채팅 사용자 지침 (부록 G.3) — 미설정이면 기본 시드 사용 */
   aiChatInstructions?: string;
 }

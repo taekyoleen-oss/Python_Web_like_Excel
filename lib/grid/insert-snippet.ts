@@ -92,12 +92,14 @@ export function insertSnippetAsBlock(
   dir: "above" | "below",
   title: string,
   code: string,
+  /** 블록 설명 (부록 J.4) — 채팅 코드 제안이 note를 함께 줄 때 (한 트랜잭션 유지) */
+  note?: string,
 ): { id: string; ordered: boolean } | null {
   const spot = refId
     ? placeAdjacentAnchor(useWorkbookStore.getState().workbook, refId, dir)
     : null;
   if (!spot) {
-    const ids = createReferenceBlocks(null, [{ title, code }]);
+    const ids = createReferenceBlocks(null, [{ title, code, note }]);
     return ids[0] ? { id: ids[0], ordered: false } : null;
   }
   const block: PyBlock = {
@@ -108,6 +110,7 @@ export function insertSnippetAsBlock(
     outputMode: "values",
     includeIndex: "auto",
     title,
+    ...(note ? { note } : {}),
   };
   normalizeBlock(block); // 코드 블록은 출력 1개 보장
   useWorkbookStore.setState((state) => {

@@ -15,6 +15,8 @@ export interface SendSection {
   code: string;
   /** 설정 시 code 대신 마크다운 블록을 만든다 (H.3 모델적합 가이드) */
   markdown?: string;
+  /** 코드 블록의 설명(부록 J.4) */
+  note?: string;
   /** 출력 모드 (기본 values) — fig가 마지막 표현식인 블록은 object */
   outputMode?: "values" | "object";
   /** 이 블록 아래로 비워둘 행 수(값 모드 spill 여유, 기본 2) */
@@ -108,6 +110,7 @@ export function createReferenceBlocks(title: string | null, sections: SendSectio
       outputMode: s.outputMode ?? "values",
       includeIndex: "auto",
       ...(s.title ? { title: s.title } : {}),
+      ...(s.note ? { note: s.note } : {}),
     };
     normalizeBlock(block); // 코드 블록은 출력 1개 보장
     blocks.push(block);

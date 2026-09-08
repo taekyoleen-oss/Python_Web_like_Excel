@@ -1,9 +1,8 @@
-// AI 컨텍스트 수집 (부록 E R6) — 시트 스키마(값 미전송: 이름·범위·헤더 행만) +
-// 런타임 변수 스키마(inspect) + 워커 FS 파일 + 이전 블록 코드.
+// AI 시트 스키마 (부록 E R6 → L.5) — 값은 전송하지 않는다: 이름·사용 범위·헤더 행만.
+// list_sheets 도구(lib/ai/tools.ts)와 첫 메시지의 시트 개요 한 줄이 함께 쓴다.
 
 import { cellKey, type Workbook } from "@/types/workbook";
 import { formatA1 } from "@/lib/grid/a1";
-import { blocksInOrder, useWorkbookStore } from "@/lib/grid/model";
 import { usedRange } from "@/lib/io/data-import";
 
 export interface SheetSchema {
@@ -33,37 +32,13 @@ export function sheetSchemas(workbook: Workbook): SheetSchema[] {
   });
 }
 
-/** 대상 블록 이전(계산 순서)의 코드 블록 코드 — blockId 없으면 전체 */
-export function priorCode(workbook: Workbook, blockId?: string): string {
-  const blocks = blocksInOrder(workbook).filter((b) => b.kind !== "markdown");
-  const upto = blockId ? blocks.findIndex((b) => b.id === blockId) : blocks.length;
-  return blocks
-    .slice(0, upto < 0 ? blocks.length : upto)
-    .map((b) => b.code)
-    .filter((c) => c.trim() !== "")
-    .join("\n\n# ── 다음 블록 ──\n");
-}
-
 /**
- * user message용 컨텍스트 JSON + 이전 코드. 런타임이 준비 전이거나 실패하면
- * vars/files는 빈 값으로 폴백한다(요청은 계속 진행).
+ * 전송 메시지에 붙이는 시트 개요 한 줄 — 사소한 질문에 list_sheets 왕복을 줄인다.
+ * 값은 포함되지 않는다(이름·범위·블록 수만). 자세한 내용은 도구로 확인하게 한다.
  */
-export async function collectContext(
-  blockId?: string,
-): Promise<{ schema: string; priorCode: string }> {
-  const wb = useWorkbookStore.getState().workbook;
-  let vars: unknown[] = [];
-  let files: string[] = [];
-  try {
-    const { getRuntimeClient } = await import("@/lib/runtime/client");
-    const client = getRuntimeClient();
-    files = client.listFiles().filter((f) => !f.startsWith("_"));
-    if (client.getStatus() === "ready") vars = await client.inspect();
-  } catch {
-    // 런타임 미준비 — 시트 스키마만으로 진행
-  }
-  return {
-    schema: JSON.stringify({ sheets: sheetSchemas(wb), vars, files }, null, 0),
-    priorCode: priorCode(wb, blockId),
-  };
+export function sheetOverview(workbook: Workbook): string {
+  const sheets = workbook.sheets
+    .map((s) => `${s.name}!${formatA1(usedRange(s))}`)
+    .join(", ");
+  return `[워크북 개요] 시트: ${sheets || "(없음)"} · 블록 ${workbook.pyBlocks.length}개 (값·코드는 도구로 확인하세요)`;
 }

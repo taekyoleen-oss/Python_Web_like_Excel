@@ -1,6 +1,7 @@
-// 부록 G.2·G.3 — 채팅 프롬프트 조립·N턴 캡·지침 펜스·코드 분리·이력 캡
+// 부록 G.2·G.3 + L — 채팅 프롬프트 조립(도구 지침 포함)·N턴 캡·지침 펜스·코드 분리·이력 캡·블록 프리셋
 import { describe, expect, it } from "vitest";
 import {
+  buildBlockAsk,
   buildChatSystem,
   capHistory,
   CHAT_HISTORY_CAP,
@@ -21,14 +22,60 @@ describe("buildChatSystem", () => {
     expect(sys).toContain("내 지침 한 줄");
     expect(sys).toContain("앱 규칙이 우선");
     expect(sys).toContain("```지침");
-    // 채팅에서는 단일 코드 블록 규칙을 해제한다
-    expect(sys).toContain("적용하지 않습니다");
+    // 사용자 지침은 앱 규칙 뒤(추가 레이어)에 온다
+    expect(sys.indexOf(SYSTEM)).toBeLessThan(sys.indexOf("내 지침 한 줄"));
+  });
+
+  it("도구 사용 지침(L.1) — 값은 read_range, 변경은 propose_*, 자동 실행 없음", () => {
+    const sys = buildChatSystem("");
+    expect(sys).toContain("read_range");
+    expect(sys).toContain("propose_cells");
+    expect(sys).toContain("propose_block");
+    expect(sys).toContain("제안만");
+    expect(sys).toContain("자동 실행은 없습니다");
   });
 
   it("빈 지침은 (없음) 표기, 기본 시드는 4개 항목", () => {
     expect(buildChatSystem("  ")).toContain("(없음)");
     expect(DEFAULT_CHAT_INSTRUCTIONS.split("\n")).toHaveLength(4);
     expect(DEFAULT_CHAT_INSTRUCTIONS).toContain("보험·계리");
+  });
+});
+
+describe("buildBlockAsk (L.5 — 블록 ✦ 4액션)", () => {
+  const ctx = {
+    id: "blk1",
+    title: "손해율",
+    anchor: "Sheet1!B3",
+    code: "df.sum()",
+    note: "설명",
+  };
+
+  it("제목·앵커·id·코드·note를 첨부로 싣는다", () => {
+    const ask = buildBlockAsk("edit", ctx);
+    expect(ask.attachment?.label).toBe("블록");
+    expect(ask.attachment?.text).toContain("손해율");
+    expect(ask.attachment?.text).toContain("Sheet1!B3");
+    expect(ask.attachment?.text).toContain("id: blk1");
+    expect(ask.attachment?.text).toContain("df.sum()");
+    expect(ask.attachment?.text).toContain("설명");
+    expect(ask.question).toContain("propose_block");
+  });
+
+  it("오류 상태면 traceback을 함께 싣는다", () => {
+    const ask = buildBlockAsk("fix", {
+      ...ctx,
+      traceback: "NameError: name 'df' is not defined",
+      errorSummary: "이름 오류",
+    });
+    expect(ask.attachment?.label).toBe("블록 + 오류");
+    expect(ask.attachment?.text).toContain("NameError");
+    expect(ask.attachment?.text).toContain("이름 오류");
+    expect(ask.question).toContain("원인");
+  });
+
+  it("자유 요청은 질문이 비어 있다(사용자가 입력)", () => {
+    expect(buildBlockAsk("free", ctx).question).toBe("");
   });
 });
 
@@ -44,6 +91,26 @@ describe("chatMessages / capHistory", () => {
     expect(sent).toHaveLength(CHAT_TURNS);
     expect(sent[sent.length - 1].content).toBe("m29");
     expect(chatMessages(many(3))).toHaveLength(3);
+  });
+
+  it("UI 전용 필드(도구 로그·제안)는 전송에서 제외된다", () => {
+    const sent = chatMessages([
+      { role: "user", content: "질문" },
+      {
+        role: "assistant",
+        content: "답",
+        tools: [{ name: "read_range", input: {}, summary: "읽음" }],
+        proposals: [
+          { id: "p1", kind: "block", code: "x=1" },
+        ],
+      },
+      { role: "user", content: "후속" },
+    ]);
+    expect(sent).toEqual([
+      { role: "user", content: "질문" },
+      { role: "assistant", content: "답" },
+      { role: "user", content: "후속" },
+    ]);
   });
 
   it("API 계약 보정: 앞의 assistant 제거 + 연속 같은 역할 병합", () => {

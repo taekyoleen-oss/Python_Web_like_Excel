@@ -1,32 +1,45 @@
-// Anthropic API 브라우저 직접 호출 (부록 E R6, E.0 확정: 서버 라우트 없음).
+// Anthropic Messages API 브라우저 직접 호출 (부록 E R6, E.0 확정: 서버 라우트 없음).
 // 키는 호출 시점에만 메모리로 전달된다 — 로그·워크북·전송 외 저장 금지.
-
-import { buildUserMessage, SYSTEM, type AssistInput } from "./prompt";
+// 부록 L: 도구(tool use)를 포함한 단일 요청. 루프는 lib/ai/agent.ts가 돈다.
 
 const MODEL = "claude-sonnet-4-6"; // 소스(pyAssist.ts) 유지
 
-export interface AssistResult {
-  code: string;
-  explanation: string;
+export interface ApiContentBlock {
+  type: string;
+  text?: string;
+  /** tool_use */
+  id?: string;
+  name?: string;
+  input?: unknown;
+  /** tool_result */
+  tool_use_id?: string;
+  content?: unknown;
+  is_error?: boolean;
 }
 
-/** 응답 텍스트 → 설명 + 파이썬 코드 블록 1개 (소스 parseResponse 이식) */
-export function parseResponse(text: string): AssistResult {
-  const m = text.match(/```(?:python|py)?\s*\n?([\s\S]*?)```/);
-  if (m) {
-    return { code: m[1].trim(), explanation: text.slice(0, m.index).trim() };
-  }
-  // 코드 블록이 없으면 전체를 설명으로(코드 없음)
-  return { code: "", explanation: text.trim() };
+export interface ApiMessage {
+  role: "user" | "assistant";
+  content: string | ApiContentBlock[];
 }
 
-/** 공용 호출 — 시스템+메시지로 1회 요청, 응답 텍스트 반환. 실패 시 한국어 throw */
-async function callText(
+export interface ApiResponse {
+  content: ApiContentBlock[];
+  stop_reason?: string;
+}
+
+export interface CallOptions {
+  maxTokens?: number;
+  /** 도구 스키마 (있으면 tool use 활성) */
+  tools?: readonly unknown[];
+}
+
+/** Messages API 1회 호출 — 실패 시 한국어 throw */
+export async function callMessages(
   apiKey: string,
   system: string,
-  messages: { role: "user" | "assistant"; content: string }[],
-  maxTokens: number,
-): Promise<string> {
+  messages: ApiMessage[],
+  opts: CallOptions = {},
+): Promise<ApiResponse> {
   let res: Response;
   try {
     res = await fetch("https://api.anthropic.com/v1/messages", {
@@ -39,9 +52,10 @@ async function callText(
       },
       body: JSON.stringify({
         model: MODEL,
-        max_tokens: maxTokens,
+        max_tokens: opts.maxTokens ?? 2400,
         system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
         messages,
+        ...(opts.tools && opts.tools.length > 0 ? { tools: opts.tools } : {}),
       }),
     });
   } catch {
@@ -60,31 +74,14 @@ async function callText(
     throw new Error(`API 오류 (${res.status})${detail ? `: ${detail}` : ""}`);
   }
 
-  const body = (await res.json()) as { content?: { type: string; text?: string }[] };
-  const text = (body.content ?? [])
+  const body = (await res.json()) as Partial<ApiResponse>;
+  return { content: body.content ?? [], stop_reason: body.stop_reason };
+}
+
+/** 응답 content 블록 → 텍스트 */
+export function textOf(content: ApiContentBlock[]): string {
+  return content
     .map((b) => (b.type === "text" ? (b.text ?? "") : ""))
     .join("\n")
     .trim();
-  if (!text) throw new Error("빈 응답을 받았습니다 — 다시 시도하세요");
-  return text;
-}
-
-/** AI 코드 제안 1회 호출 (4모드 — 부록 E R6, 동작 불변) */
-export async function assist(apiKey: string, input: AssistInput): Promise<AssistResult> {
-  const text = await callText(
-    apiKey,
-    SYSTEM,
-    [{ role: "user", content: buildUserMessage(input) }],
-    1600,
-  );
-  return parseResponse(text);
-}
-
-/** AI 채팅 멀티턴 1회 호출 (부록 G.2) — 시스템은 lib/ai/chat.ts buildChatSystem */
-export async function chat(
-  apiKey: string,
-  system: string,
-  messages: { role: "user" | "assistant"; content: string }[],
-): Promise<string> {
-  return callText(apiKey, system, messages, 2400);
 }

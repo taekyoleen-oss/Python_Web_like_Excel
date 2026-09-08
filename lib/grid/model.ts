@@ -210,6 +210,8 @@ export interface WorkbookState {
   executedRefs: Record<string, SheetRange[]>;
   /** 부록 J.3: 실행 참조 표시 토글 (기본 켬, 설정에 저장, undo 대상 아님) */
   showRefs: boolean;
+  /** 부록 L.2: 채팅 에이전트가 read_range로 읽은 근거 범위 (transient — 이력·저장 무관) */
+  chatRefs: SheetRange[];
   /** spill 잠김(src) 셀이면 false를 반환하고 아무것도 바꾸지 않는다 */
   setCellValue: (sheetId: string, r: number, c: number, cell: Cell | null) => boolean;
   /** 일괄 편집 = 한 트랜잭션 = 한 undo 단계 */
@@ -321,6 +323,8 @@ export interface WorkbookState {
   /** 부록 J.3: 성공 실행의 참조 기록 (null이면 제거) */
   setExecutedRefs: (blockId: string, refs: SheetRange[] | null) => void;
   setShowRefs: (show: boolean) => void;
+  /** 부록 L.2: 채팅 근거 하이라이트 (빈 배열이면 표시 없음) */
+  setChatRefs: (refs: SheetRange[]) => void;
   setTocOpen: (open: boolean) => void;
   setAiChatOpen: (open: boolean) => void;
   /** 그리드·Python 패널 접기 — 둘 다 접히면 화면이 비므로 반대쪽은 자동으로 펼친다 */
@@ -440,6 +444,7 @@ export const createWorkbookStore = () => {
           view: "workbook" as const,
           executedRefs: {},
           showRefs: true,
+          chatRefs: [],
 
           setCellValue: (sheetId, r, c, cell) => {
             const sheet = get().workbook.sheets.find((s) => s.id === sheetId);
@@ -648,6 +653,7 @@ export const createWorkbookStore = () => {
               state.runningBlocks = {};
               state.dirtyBlocks = {};
               state.executedRefs = {};
+              state.chatRefs = [];
               state.selectedBlockId = null;
               state.lastEditorBlockId = null;
               state.hoverBlockId = null;
@@ -667,6 +673,7 @@ export const createWorkbookStore = () => {
               state.runningBlocks = {};
               state.dirtyBlocks = {};
               state.executedRefs = {};
+              state.chatRefs = [];
               state.selectedBlockId = null;
               state.lastEditorBlockId = null;
               state.hoverBlockId = null;
@@ -1141,6 +1148,11 @@ export const createWorkbookStore = () => {
           setShowRefs: (show) =>
             set((state) => {
               state.showRefs = show;
+            }),
+
+          setChatRefs: (refs) =>
+            set((state) => {
+              state.chatRefs = refs;
             }),
 
           setTocOpen: (open) =>

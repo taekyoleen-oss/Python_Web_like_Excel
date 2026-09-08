@@ -191,19 +191,26 @@ export default function SheetGrid() {
     return out;
   }, [executedRefs, showRefs, sheet.id]);
 
+  // 부록 L.2: 채팅 에이전트가 읽은 근거 범위 (amber tint)
+  const chatRefs = useWorkbookStore((s) => s.chatRefs);
+  const chatRanges = useMemo(
+    () => chatRefs.filter((rg) => rg.sheetId === sheet.id) as CellRange[],
+    [chatRefs, sheet.id],
+  );
+
   // drawCell만 바뀌면 glide가 다시 그리지 않는다 — 참조 tint 영역(이전+현재)을 직접 damage
   const prevRefRanges = useRef<CellRange[]>([]);
   useEffect(() => {
     const cells: { cell: Item }[] = [];
-    for (const rg of [...prevRefRanges.current, ...refRanges]) {
+    for (const rg of [...prevRefRanges.current, ...refRanges, ...chatRanges]) {
       for (let r = rg.r0; r <= rg.r1 && cells.length < 20_000; r++) {
         for (let c = rg.c0; c <= rg.c1; c++) cells.push({ cell: [c, r] });
       }
     }
     // ponytail: 20k 셀 상한 — 초대형 참조는 스크롤 시 자연 리페인트로 마저 그린다
-    prevRefRanges.current = refRanges;
+    prevRefRanges.current = [...refRanges, ...chatRanges];
     if (cells.length > 0) editorRef.current?.updateCells(cells);
-  }, [refRanges]);
+  }, [refRanges, chatRanges]);
 
   const flashRange = flash && flash.sheetId === sheet.id ? flash.range : null;
   const hoverRange = useWorkbookStore((s) => s.hoverRange);
@@ -373,13 +380,18 @@ export default function SheetGrid() {
         ctx.restore();
       }
 
-      // 부록 J.3: 실행 참조 tint — teal 배경 + 범위 가장자리 얇은 점선 (spill Sky Blue와 구별)
-      for (const rg of refRanges) {
+      // 부록 J.3: 실행 참조 tint(teal) + 부록 L.2: 채팅이 읽은 근거 tint(amber)
+      // — 둘 다 배경 + 가장자리 얇은 점선 (spill Sky Blue와 구별)
+      for (const [ranges, fill, stroke] of [
+        [refRanges, "rgba(31, 110, 100, 0.08)", "#1F6E64"], // --chip-teal-fg 8%
+        [chatRanges, "rgba(125, 90, 20, 0.12)", "#7D5A14"], // --chip-amber-fg 12%
+      ] as const) {
+      for (const rg of ranges) {
         if (!inRange(rg, row, col)) continue;
         ctx.save();
-        ctx.fillStyle = "rgba(31, 110, 100, 0.08)"; // --chip-teal-fg 8%
+        ctx.fillStyle = fill;
         ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
-        ctx.strokeStyle = "#1F6E64";
+        ctx.strokeStyle = stroke;
         ctx.lineWidth = 1;
         ctx.setLineDash([3, 3]);
         ctx.beginPath();
@@ -401,6 +413,7 @@ export default function SheetGrid() {
         }
         ctx.stroke();
         ctx.restore();
+      }
       }
 
       // 성공 플래시 (400ms)
@@ -458,7 +471,16 @@ export default function SheetGrid() {
         ctx.restore();
       }
     },
-    [anchorMap, sheet.cells, spillRanges, refRanges, flashRange, editorHover, runningBlocks],
+    [
+      anchorMap,
+      sheet.cells,
+      spillRanges,
+      refRanges,
+      chatRanges,
+      flashRange,
+      editorHover,
+      runningBlocks,
+    ],
   );
 
   const onCellEdited = useCallback(
