@@ -134,6 +134,8 @@ export default function Header({ children }: { children?: ReactNode }) {
             <li>Ctrl(또는 Alt)+1 — 그리드로 포커스</li>
             <li>Ctrl(또는 Alt)+2 — Python 편집기로 포커스</li>
             <li>Ctrl(또는 Alt)+3 — 하단 패널로 포커스</li>
+            <li>Ctrl+Alt+1 — 스프레드시트 접기/펼치기</li>
+            <li>Ctrl+Alt+2 — Python 패널 접기/펼치기</li>
           </ul>
         </TooltipContent>
       </Tooltip>

@@ -200,6 +200,10 @@ export interface WorkbookState {
   tocOpen: boolean;
   /** AI 채팅 패널 열림 (부록 G.2, 설정에 저장, undo 대상 아님) */
   aiChatOpen: boolean;
+  /** 스프레드시트 패널 접힘 (설정에 저장, undo 대상 아님) */
+  gridCollapsed: boolean;
+  /** Python 패널 접힘 (설정에 저장, undo 대상 아님) */
+  pyCollapsed: boolean;
   /** 상단 뷰 전환 — 워크북 | 데이터 예제/분석 (부록 E, 설정에 저장, undo 대상 아님) */
   view: "workbook" | "reference";
   /** 부록 J.3: 블록별 마지막 성공 실행이 읽은 xl() 참조 범위 (transient — 이력·저장 무관) */
@@ -319,6 +323,8 @@ export interface WorkbookState {
   setShowRefs: (show: boolean) => void;
   setTocOpen: (open: boolean) => void;
   setAiChatOpen: (open: boolean) => void;
+  /** 그리드·Python 패널 접기 — 둘 다 접히면 화면이 비므로 반대쪽은 자동으로 펼친다 */
+  setPanelCollapsed: (panel: "grid" | "python", collapsed: boolean) => void;
   setView: (view: "workbook" | "reference") => void;
 }
 
@@ -429,6 +435,8 @@ export const createWorkbookStore = () => {
           anchorPicking: null,
           tocOpen: false,
           aiChatOpen: false,
+          gridCollapsed: false,
+          pyCollapsed: false,
           view: "workbook" as const,
           executedRefs: {},
           showRefs: true,
@@ -1143,6 +1151,17 @@ export const createWorkbookStore = () => {
           setAiChatOpen: (open) =>
             set((state) => {
               state.aiChatOpen = open;
+            }),
+
+          setPanelCollapsed: (panel, collapsed) =>
+            set((state) => {
+              if (panel === "grid") {
+                state.gridCollapsed = collapsed;
+                if (collapsed) state.pyCollapsed = false; // 마지막 하나는 남긴다
+              } else {
+                state.pyCollapsed = collapsed;
+                if (collapsed) state.gridCollapsed = false;
+              }
             }),
 
           setView: (view) =>

@@ -94,7 +94,8 @@ test("AI 채팅: 토글 → 키 유도 → 코드 카드 → 블록 반영 → �
   const instrValue = await instrArea.inputValue();
   expect(instrValue).toContain("보험·계리");
   expect(instrValue).toContain("예제는 3행 이내 데이터로 만든다.");
-  await page.getByRole("dialog").getByRole("button", { name: "닫기" }).click();
+  // Dialog에는 shadcn 기본 X(sr-only "닫기")와 본문 닫기 버튼이 함께 있다 — 본문 버튼을 겨냥
+  await page.getByRole("dialog").getByRole("button", { name: "닫기", exact: true }).last().click();
 
   // ── 대화 유지: ✕로 닫고 툴바로 다시 열어도 이력이 남아 있다 (IndexedDB)
   await panel.getByRole("button", { name: "AI 채팅 패널 닫기" }).click();

@@ -8,6 +8,7 @@ import {
   Article,
   ChatCircleText,
   ClipboardText,
+  Code,
   ListBullets,
   Play,
   Plus,
@@ -15,6 +16,7 @@ import {
   SortAscending,
   SortDescending,
   Stop,
+  Table,
   TextB,
 } from "@phosphor-icons/react";
 import { startPasteFlow } from "@/components/grid/PasteImportDialog";
@@ -138,6 +140,20 @@ function PasteOptionsDialog({ open, onClose }: { open: boolean; onClose: () => v
       </DialogContent>
     </Dialog>
   );
+}
+
+/**
+ * 그리드·Python 패널 접기 토글 (툴바·세로 스트립·단축키 공용).
+ * next 생략 시 현재 상태를 뒤집는다. 접힘 상태는 앱 설정에 저장 — 새로고침해도 유지.
+ */
+export function togglePanelCollapse(panel: "grid" | "python", next?: boolean): void {
+  const st = useWorkbookStore.getState();
+  const current = panel === "grid" ? st.gridCollapsed : st.pyCollapsed;
+  const target = next ?? !current;
+  if (target === current) return; // 이미 그 상태 — 불필요한 설정 쓰기 방지
+  st.setPanelCollapsed(panel, target);
+  const { gridCollapsed, pyCollapsed } = useWorkbookStore.getState();
+  void saveSettings({ gridCollapsed, pyCollapsed });
 }
 
 function ToolButton({
@@ -271,6 +287,8 @@ export default function GridToolbar() {
   });
   const tocOpen = useWorkbookStore((s) => s.tocOpen);
   const aiChatOpen = useWorkbookStore((s) => s.aiChatOpen);
+  const gridCollapsed = useWorkbookStore((s) => s.gridCollapsed);
+  const pyCollapsed = useWorkbookStore((s) => s.pyCollapsed);
 
   const store = () => useWorkbookStore.getState();
   const rowIndex = selection?.r0 ?? 0;
@@ -365,6 +383,23 @@ export default function GridToolbar() {
       <ToolButton label="마크다운 블록 추가" onClick={addMarkdownAtSelection}>
         <Article />
       </ToolButton>
+      {/* 패널 접기 — 1024px 미만은 탭 전환 UI라 접기 개념이 없다 (lg:contents = 레이아웃 무영향) */}
+      <span className="hidden lg:contents">
+        <ToolButton
+          label={gridCollapsed ? "스프레드시트 보이기 (Ctrl+Alt+1)" : "스프레드시트 감추기 (Ctrl+Alt+1)"}
+          active={gridCollapsed}
+          onClick={() => togglePanelCollapse("grid")}
+        >
+          <Table />
+        </ToolButton>
+        <ToolButton
+          label={pyCollapsed ? "Python 패널 보이기 (Ctrl+Alt+2)" : "Python 패널 감추기 (Ctrl+Alt+2)"}
+          active={pyCollapsed}
+          onClick={() => togglePanelCollapse("python")}
+        >
+          <Code />
+        </ToolButton>
+      </span>
       <ToolButton
         label={tocOpen ? "목차 패널 닫기" : "목차 패널 열기"}
         active={tocOpen}

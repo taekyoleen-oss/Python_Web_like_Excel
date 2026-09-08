@@ -10,7 +10,7 @@ import {
   ResizablePanelGroup,
 } from "@/components/ui/resizable";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import GridToolbar from "@/components/grid/GridToolbar";
+import GridToolbar, { togglePanelCollapse } from "@/components/grid/GridToolbar";
 import PasteImportDialog, { startPasteFlow } from "@/components/grid/PasteImportDialog";
 import SheetGrid from "@/components/grid/SheetGrid";
 import SheetTabs from "@/components/grid/SheetTabs";
@@ -71,6 +71,23 @@ function useTier(): Tier {
 
 type MobileView = "grid" | "python" | "toc" | "ai" | "bottom";
 
+/** 접힌 패널 자리의 얇은 세로 스트립 — 클릭하면 다시 펼쳐진다 */
+function CollapsedStrip({ panel, label }: { panel: "grid" | "python"; label: string }) {
+  return (
+    <button
+      data-testid={`strip-${panel}`}
+      aria-label={`${label} 패널 열기`}
+      onClick={() => togglePanelCollapse(panel, false)}
+      className={`flex w-7 shrink-0 flex-col items-center justify-start gap-1 bg-muted/40 py-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground ${
+        panel === "grid" ? "border-r" : "border-l"
+      }`}
+    >
+      {panel === "grid" ? <CaretRight className="size-3" /> : <CaretLeft className="size-3" />}
+      <span className="[writing-mode:vertical-rl] tracking-wide">{label}</span>
+    </button>
+  );
+}
+
 export default function WorkbookShell() {
   const saveStatus = useAutosave();
   const [restored, setRestored] = useState(false);
@@ -82,8 +99,10 @@ export default function WorkbookShell() {
   const tier = useTier();
   const tierRef = useRef(tier);
   tierRef.current = tier;
-  const [pyCollapsed, setPyCollapsed] = useState(false);
   const [mobileView, setMobileView] = useState<MobileView>("grid");
+  // 패널 접힘 — lg·xl 공통(스토어 + 설정 저장). 둘 다 접히지 않도록 스토어가 보장한다
+  const gridCollapsed = useWorkbookStore((s) => s.gridCollapsed);
+  const pyCollapsed = useWorkbookStore((s) => s.pyCollapsed);
   const tocOpen = useWorkbookStore((s) => s.tocOpen);
   // 부록 E R2: 뷰 전환 — 두 뷰 모두 마운트 유지(런타임·상태 보존), 비활성은 hidden
   const view = useWorkbookStore((s) => s.view);
@@ -104,10 +123,9 @@ export default function WorkbookShell() {
   // 분할 크기 — 목차·AI 채팅 패널이 열리면 그리드·Python이 비율대로 줄어든다 (합계 100%)
   const TOC_SIZE = 16;
   const AI_SIZE = 20;
-  const pyHidden = tier === "lg" && pyCollapsed;
   const rest = 100 - (tocOpen ? TOC_SIZE : 0) - (aiChatOpen ? AI_SIZE : 0);
-  const gridSize = pyHidden ? rest : Math.round((splitRatio / 100) * rest);
-  const pySize = rest - gridSize;
+  const gridSize = pyCollapsed ? rest : Math.round((splitRatio / 100) * rest);
+  const pySize = gridCollapsed ? rest : rest - gridSize;
 
   // 런타임 백그라운드 부트 (멱등) — 첫 페인트와 CDN 다운로드가 경쟁하지 않게 유휴 시점으로 미룬다
   useEffect(() => {
@@ -122,13 +140,14 @@ export default function WorkbookShell() {
       const st = useWorkbookStore.getState();
       if (!st.selection) st.setSelection({ r0: 0, c0: 0, r1: 0, c1: 0 }); // 키보드 시작점
       if (tierRef.current === "md" || tierRef.current === "sm") setMobileView("grid");
+      togglePanelCollapse("grid", false); // 접혀 있으면 펼치고 포커스
       requestAnimationFrame(() =>
         document.querySelector<HTMLElement>('[data-testid="data-grid-canvas"]')?.focus(),
       );
     };
     const focusPython = () => {
       if (tierRef.current === "md" || tierRef.current === "sm") setMobileView("python");
-      setPyCollapsed(false);
+      togglePanelCollapse("python", false);
       const st = useWorkbookStore.getState();
       const target = st.lastEditorBlockId ?? st.workbook.pyBlocks[0]?.id;
       if (target) requestAnimationFrame(() => useWorkbookStore.getState().setFocusBlock(target));
@@ -147,6 +166,12 @@ export default function WorkbookShell() {
       // 출력 위치 지정 취소 (§ 앵커 재지정)
       if (e.key === "Escape" && useWorkbookStore.getState().anchorPicking) {
         useWorkbookStore.getState().setAnchorPicking(null);
+        return;
+      }
+      // Ctrl+Alt+1/2 — 스프레드시트·Python 패널 접기/펼치기 (포커스 이동 단축키보다 먼저 판정)
+      if ((e.ctrlKey || e.metaKey) && e.altKey && (e.key === "1" || e.key === "2")) {
+        e.preventDefault();
+        togglePanelCollapse(e.key === "1" ? "grid" : "python");
         return;
       }
       // 패널 포커스 이동은 텍스트 입력 중에도 동작 (Ctrl+숫자는 브라우저 탭 예약이라 Alt+숫자 병용)
@@ -216,6 +241,10 @@ export default function WorkbookShell() {
         if (settings?.splitRatio) setSplitRatio(settings.splitRatio);
         if (settings?.bottomPanelHeight) setBottomHeight(settings.bottomPanelHeight);
         if (settings?.tocOpen) useWorkbookStore.getState().setTocOpen(true);
+        if (settings?.gridCollapsed)
+          useWorkbookStore.getState().setPanelCollapsed("grid", true);
+        if (settings?.pyCollapsed)
+          useWorkbookStore.getState().setPanelCollapsed("python", true);
         if (settings?.aiChatOpen) useWorkbookStore.getState().setAiChatOpen(true);
         if (settings?.showRefs === false) useWorkbookStore.getState().setShowRefs(false);
         if (settings?.view === "reference") useWorkbookStore.getState().setView("reference");
@@ -331,35 +360,29 @@ export default function WorkbookShell() {
             onLayoutChanged={onVerticalLayoutChanged}
           >
             <ResizablePanel id="main" defaultSize={`${100 - bottomHeight}%`} minSize="30%">
-              <div className="relative h-full">
-                {/* §4.7 1024–1279: Python 패널 접이식 토글 */}
-                {tier === "lg" && (
-                  <button
-                    onClick={() => setPyCollapsed((v) => !v)}
-                    aria-label={pyCollapsed ? "Python 패널 열기" : "Python 패널 접기"}
-                    className="absolute right-0 top-8 z-10 rounded-l border border-r-0 bg-muted px-0.5 py-2 text-muted-foreground hover:text-foreground"
-                  >
-                    {pyCollapsed ? <CaretLeft className="size-3" /> : <CaretRight className="size-3" />}
-                  </button>
-                )}
+              {/* 접힌 패널은 그룹 밖 세로 스트립으로 대체 — Panel은 Group의 직계 자식이어야 한다 */}
+              <div className="flex h-full">
+                {gridCollapsed && <CollapsedStrip panel="grid" label="시트" />}
                 <ResizablePanelGroup
-                  key={`${tier === "lg" && pyCollapsed ? "collapsed" : "split"}-${tocOpen ? "toc" : "no-toc"}-${aiChatOpen ? "ai" : "no-ai"}`}
+                  key={`${gridCollapsed ? "no-grid" : "grid"}-${pyCollapsed ? "no-py" : "py"}-${tocOpen ? "toc" : "no-toc"}-${aiChatOpen ? "ai" : "no-ai"}`}
                   orientation="horizontal"
-                  className="min-h-0"
+                  className="min-h-0 min-w-0 flex-1"
                   onLayoutChanged={onLayoutChanged}
                 >
-                  <ResizablePanel id="grid" defaultSize={`${gridSize}%`} minSize="40%">
-                    <div
-                      {...dropHandlers}
-                      className={`flex h-full min-w-0 flex-col ${dropActive ? "ring-2 ring-inset ring-primary" : ""}`}
-                    >
-                      <SheetGrid />
-                      <SheetTabs />
-                    </div>
-                  </ResizablePanel>
-                  {!(tier === "lg" && pyCollapsed) && (
+                  {!gridCollapsed && (
+                    <ResizablePanel id="grid" defaultSize={`${gridSize}%`} minSize="15%">
+                      <div
+                        {...dropHandlers}
+                        className={`flex h-full min-w-0 flex-col ${dropActive ? "ring-2 ring-inset ring-primary" : ""}`}
+                      >
+                        <SheetGrid />
+                        <SheetTabs />
+                      </div>
+                    </ResizablePanel>
+                  )}
+                  {!pyCollapsed && (
                     <>
-                      <ResizableHandle withHandle />
+                      {!gridCollapsed && <ResizableHandle withHandle />}
                       <ResizablePanel
                         id="python"
                         defaultSize={`${pySize}%`}
@@ -388,6 +411,7 @@ export default function WorkbookShell() {
                     </>
                   )}
                 </ResizablePanelGroup>
+                {pyCollapsed && <CollapsedStrip panel="python" label="Python" />}
               </div>
             </ResizablePanel>
             <ResizableHandle />
