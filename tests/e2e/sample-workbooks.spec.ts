@@ -105,6 +105,21 @@ const SAMPLES = [
     title: "무해지환급형 — 해지율 반영 PV 산출",
     codeBlocks: 6,
   },
+  {
+    label: "종신공제 (다급부)",
+    title: "종신공제 — 다급부 합산(이중탈퇴)",
+    codeBlocks: 7,
+  },
+  {
+    label: "정기보험 변형 (체증형·미달체)",
+    title: "정기보험 변형 — 체증형·미달체 비교",
+    codeBlocks: 6,
+  },
+  {
+    label: "상해공제 (직종축)",
+    title: "상해공제 — 직종별 위험률·만기환급형",
+    codeBlocks: 7,
+  },
 ];
 
 for (const s of SAMPLES) {
@@ -191,6 +206,59 @@ for (const s of SAMPLES) {
       // ② 이중탈퇴 생존자표 — 가입 45세 ~ 만기 90세 = 46행
       expect(await spillRowsUnder(page, "전탈퇴생존자")).toBe(46);
       // ⑤ 무해지 vs 표준형 환급률 곡선은 객체 모드
+      const figures = await page.evaluate(() =>
+        Object.values(
+          (window as any).__pygridStore.getState().workbook.sheets[0].cells,
+        ).filter((c: any) => String(c.v ?? "").startsWith("[Figure")).length,
+      );
+      expect(figures).toBeGreaterThan(0);
+    }
+    if (s.label === "종신공제 (다급부)") {
+      // 부록 M.5 #9 ⑥ — 원본 `총괄` 대조 검산표의 "차이" 열이 전부 허용오차(1e-6) 안이어야 한다
+      const diffs = await columnUnder(page, "차이");
+      expect(diffs.length).toBe(28);
+      for (const d of diffs) expect(Math.abs(Number(d))).toBeLessThanOrEqual(1e-6);
+      // ② 이중탈퇴 생존자표 — 가입 59세 ~ 만기 110세 = 52행
+      expect(await spillRowsUnder(page, "lx'(납입자)")).toBe(52);
+      // ④ 급부배율 SUMX 표 — 급부 5종
+      expect(await spillRowsUnder(page, "비중(%)")).toBe(5);
+      // ⑦ 급부별 기여도 · lx vs lx′ 그래프는 객체 모드
+      const figures = await page.evaluate(() =>
+        Object.values(
+          (window as any).__pygridStore.getState().workbook.sheets[0].cells,
+        ).filter((c: any) => String(c.v ?? "").startsWith("[Figure")).length,
+      );
+      expect(figures).toBeGreaterThan(0);
+    }
+    if (s.label === "정기보험 변형 (체증형·미달체)") {
+      // 부록 M.5 #7 ⑥ — 원본 P·(표준)P·미달P·미달표준P·V·미달V 대조 27행 + 체증 항등식 1행
+      const diffs = await columnUnder(page, "검산차이");
+      expect(diffs.length).toBe(28);
+      for (const d of diffs) expect(Math.abs(Number(d))).toBeLessThanOrEqual(1e-6);
+      // ③ 미달체 비교표 — 항목 7행
+      expect(await spillRowsUnder(page, "미달_경험x3")).toBe(7);
+      // ④ 3종 비교표 — 평준·체증·미달
+      expect(await spillRowsUnder(page, "영업P배수")).toBe(3);
+      // ⑤ 3종 준비금·환급률 곡선은 객체 모드
+      const figures = await page.evaluate(() =>
+        Object.values(
+          (window as any).__pygridStore.getState().workbook.sheets[0].cells,
+        ).filter((c: any) => String(c.v ?? "").startsWith("[Figure")).length,
+      );
+      expect(figures).toBeGreaterThan(0);
+    }
+    if (s.label === "상해공제 (직종축)") {
+      // 부록 M.5 #10 ⑥ — 원본 PV테이블 8행(형태 2 × 직종 2 × 성별 2) 대조. 원 단위라 차이 0
+      for (const col of ["차이_영업", "차이_순", "차이_만기"]) {
+        const diffs = await columnUnder(page, col);
+        expect(diffs.length, col).toBe(8);
+        for (const d of diffs) expect(Math.abs(Number(d))).toBeLessThanOrEqual(1e-6);
+      }
+      // ② 경과 기수표 — 경과 0~5년 6행 (x축이 나이가 아니다)
+      expect(await spillRowsUnder(page, "lx(80)")).toBe(6);
+      // ⑤ 직종 × 형태 매트릭스 — 8칸
+      expect(await spillRowsUnder(page, "순공제료율")).toBe(8);
+      // ⑦ 직종·형태별 공제료 그래프는 객체 모드
       const figures = await page.evaluate(() =>
         Object.values(
           (window as any).__pygridStore.getState().workbook.sheets[0].cells,

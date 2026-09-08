@@ -100,6 +100,21 @@ const SAMPLE_ACTUARIAL: SampleWorkbook[] = [
     label: "무해지환급형 (해지율 PV)",
     load: () => dyn(import("@/data/sample-workbooks/nonsurrender.pygrid.json")),
   },
+  {
+    // 부록 M.5 — 이중탈퇴 lx·lx′ → 급부 5종 기수 차분 → 급부배율 SUMX → 순·영업공제료
+    label: "종신공제 (다급부)",
+    load: () => dyn(import("@/data/sample-workbooks/whole-life-multi.pygrid.json")),
+  },
+  {
+    // 부록 M.5 — 체증형(Rx 기수) · 미달체(사망률 ×3) → 3종 비교 → 원본 P·미달P 대조
+    label: "정기보험 변형 (체증형·미달체)",
+    load: () => dyn(import("@/data/sample-workbooks/term-variants.pygrid.json")),
+  },
+  {
+    // 부록 M.5 — 직종축 위험률 → 경과 기수표 → 순수보장형·만기환급형(50%) → PV테이블 대조
+    label: "상해공제 (직종축)",
+    load: () => dyn(import("@/data/sample-workbooks/accident-class.pygrid.json")),
+  },
 ];
 
 /** 기능 소개용 소형 예제 (부록 H.2) */
