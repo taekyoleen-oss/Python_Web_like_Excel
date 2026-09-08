@@ -123,8 +123,7 @@ test("샘플 예제: 청구 심도 적합 — 로드 직후 전체 실행 성공
   await page.goto("/");
   await waitForApp(page);
 
-  await page.getByRole("button", { name: "파일" }).click();
-  await page.getByRole("menuitem", { name: "샘플 워크북" }).click();
+  await page.getByRole("button", { name: "샘플 워크북", exact: true }).click();
   await page.getByRole("menuitem", { name: "청구 심도 적합", exact: true }).click();
   await expect
     .poll(() => page.evaluate(() => (window as any).__pygridStore.getState().workbook.title))

@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
 // 부록 K — 계리 예제 데이터 내장 워크북 5종.
-// 파일 > 샘플 워크북에서 열고 전체 실행 → 모든 코드 블록 status 'ok'(실런타임).
+// 헤더 샘플 워크북 메뉴에서 열고 전체 실행 → 모든 코드 블록 status 'ok'(실런타임).
 // scipy·statsmodels 첫 로드가 있어 테스트당 5분 상한.
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -39,10 +39,9 @@ const spillRowsUnder = (page: Page, header: string) =>
     return -1;
   }, header);
 
-/** 파일 > 샘플 워크북 > <label> */
+/** 헤더의 샘플 워크북 메뉴 > <label> (파일 메뉴에서 분리됨) */
 async function openSample(page: Page, label: string, title: string) {
-  await page.getByRole("button", { name: "파일" }).click();
-  await page.getByRole("menuitem", { name: "샘플 워크북" }).click();
+  await page.getByRole("button", { name: "샘플 워크북", exact: true }).click();
   await page.getByRole("menuitem", { name: label, exact: true }).click();
   await expect
     .poll(

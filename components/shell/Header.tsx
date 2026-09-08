@@ -3,7 +3,10 @@
 // 헤더 — 로고 · 편집 가능한 워크북 제목 · 파일 메뉴 · 뷰 전환(워크북|데이터 예제/분석) · 런타임 상태 슬롯
 
 import { useState, type ReactNode } from "react";
-import FileMenu from "@/components/shell/FileMenu";
+import FileMenu, {
+  RecentWorkbookMenu,
+  SampleWorkbookMenu,
+} from "@/components/shell/FileMenu";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -91,6 +94,7 @@ export default function Header({ children }: { children?: ReactNode }) {
           </Tooltip>
         </span>
       </div>
+      <ViewSwitch />
       <Separator orientation="vertical" className="h-5" />
       {draft !== null ? (
         <Input
@@ -115,7 +119,8 @@ export default function Header({ children }: { children?: ReactNode }) {
         </button>
       )}
       <FileMenu />
-      <ViewSwitch />
+      <SampleWorkbookMenu />
+      <RecentWorkbookMenu />
       <Tooltip>
         <TooltipTrigger asChild>
           <button

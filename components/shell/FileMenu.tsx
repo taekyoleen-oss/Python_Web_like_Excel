@@ -139,6 +139,82 @@ const SAMPLE_DATASETS = [
 
 const DEFAULT_IMPORT_OPTS: ImportOptions = { toSheet: true, toFs: true, makeBlock: "xl" };
 
+
+/** 최근 워크북 열기 — 파일 메뉴와 헤더의 최근 메뉴가 공유 */
+async function openRecent(id: string): Promise<void> {
+  const wb = await getWorkbook(id);
+  if (wb) useWorkbookStore.getState().loadWorkbook(wb);
+  else toast.error("워크북을 찾을 수 없습니다 (저장소에서 정리됨)");
+}
+
+/** 샘플 워크북 메뉴 — 파일 메뉴에서 분리해 헤더에 직접 노출 (사용 빈도 높음) */
+export function SampleWorkbookMenu() {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="sm" className="h-7 px-2 text-xs">
+          샘플 워크북
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-64">
+        <DropdownMenuLabel className="text-xs text-muted-foreground">
+          계리 예제 — 데이터 + 코드 한 파일
+        </DropdownMenuLabel>
+        {SAMPLE_ACTUARIAL.map((s) => (
+          <DropdownMenuItem key={s.label} onClick={() => void openSampleWorkbook(s)}>
+            {s.label}
+          </DropdownMenuItem>
+        ))}
+        <DropdownMenuSeparator />
+        <DropdownMenuLabel className="text-xs text-muted-foreground">기본 예제</DropdownMenuLabel>
+        {SAMPLE_BASIC.map((s) => (
+          <DropdownMenuItem key={s.label} onClick={() => void openSampleWorkbook(s)}>
+            {s.label}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/** 최근 워크북 메뉴 — 열 때마다 idb에서 목록을 다시 읽는다 */
+export function RecentWorkbookMenu() {
+  const [recent, setRecent] = useState<Workbook[]>([]);
+  const currentId = useWorkbookStore((s) => s.workbook.id);
+  return (
+    <DropdownMenu
+      onOpenChange={(open) => {
+        if (open) void listWorkbooks().then(setRecent);
+      }}
+    >
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="sm" className="h-7 px-2 text-xs">
+          최근 워크북
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="max-h-72 w-64 overflow-y-auto">
+        {recent.length === 0 ? (
+          <DropdownMenuItem disabled>저장된 워크북 없음</DropdownMenuItem>
+        ) : (
+          recent.map((wb) => (
+            <DropdownMenuItem key={wb.id} onClick={() => void openRecent(wb.id)}>
+              <div className="min-w-0">
+                <div className="truncate text-xs">
+                  {wb.id === currentId ? "● " : ""}
+                  {wb.title}
+                </div>
+                <div className="font-mono text-[10px] text-muted-foreground">
+                  {wb.updatedAt.slice(0, 16).replace("T", " ")}
+                </div>
+              </div>
+            </DropdownMenuItem>
+          ))
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 export default function FileMenu() {
   const inputRef = useRef<HTMLInputElement>(null);
   const dataInputRef = useRef<HTMLInputElement>(null);
@@ -238,12 +314,6 @@ export default function FileMenu() {
     void listWorkbooks().then((list) => setRecent(list.slice(0, 10)));
   };
 
-  const openRecent = async (id: string) => {
-    const wb = await getWorkbook(id);
-    if (wb) useWorkbookStore.getState().loadWorkbook(wb);
-    else toast.error("워크북을 찾을 수 없습니다 (저장소에서 정리됨)");
-  };
-
   const currentId = useWorkbookStore((s) => s.workbook.id);
 
   return (
@@ -318,52 +388,6 @@ export default function FileMenu() {
           <DropdownMenuItem onClick={() => void exportCsv()}>
             CSV로 내보내기 (활성 시트)
           </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuSub>
-            <DropdownMenuSubTrigger>샘플 워크북</DropdownMenuSubTrigger>
-            <DropdownMenuSubContent className="w-64">
-              <DropdownMenuLabel className="text-xs text-muted-foreground">
-                계리 예제 — 데이터 + 코드 한 파일
-              </DropdownMenuLabel>
-              {SAMPLE_ACTUARIAL.map((s) => (
-                <DropdownMenuItem key={s.label} onClick={() => void openSampleWorkbook(s)}>
-                  {s.label}
-                </DropdownMenuItem>
-              ))}
-              <DropdownMenuSeparator />
-              <DropdownMenuLabel className="text-xs text-muted-foreground">
-                기본 예제
-              </DropdownMenuLabel>
-              {SAMPLE_BASIC.map((s) => (
-                <DropdownMenuItem key={s.label} onClick={() => void openSampleWorkbook(s)}>
-                  {s.label}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuSubContent>
-          </DropdownMenuSub>
-          <DropdownMenuSeparator />
-          <DropdownMenuSub>
-            <DropdownMenuSubTrigger>최근 워크북</DropdownMenuSubTrigger>
-            <DropdownMenuSubContent className="max-h-72 w-64 overflow-y-auto">
-              {recent.length === 0 ? (
-                <DropdownMenuItem disabled>저장된 워크북 없음</DropdownMenuItem>
-              ) : (
-                recent.map((wb) => (
-                  <DropdownMenuItem key={wb.id} onClick={() => void openRecent(wb.id)}>
-                    <div className="min-w-0">
-                      <div className="truncate text-xs">
-                        {wb.id === currentId ? "● " : ""}
-                        {wb.title}
-                      </div>
-                      <div className="font-mono text-[10px] text-muted-foreground">
-                        {wb.updatedAt.slice(0, 16).replace("T", " ")}
-                      </div>
-                    </div>
-                  </DropdownMenuItem>
-                ))
-              )}
-            </DropdownMenuSubContent>
-          </DropdownMenuSub>
         </DropdownMenuContent>
       </DropdownMenu>
 
