@@ -5,7 +5,7 @@
 ## 소유 영역
 
 - `components/shell/` — WorkbookShell(분할·단축키 라우팅), Header, StatusBar, FileMenu, RuntimeStatus
-- `components/grid/` — SheetGrid(**glide-data-grid의 유일한 import 지점**), SheetTabs, GridToolbar, PasteImportDialog, ObjectCardCell
+- `components/grid/` — SheetGrid(**glide-data-grid의 유일한 import 지점**), SheetTabs, SheetEditToolbar, PasteImportDialog, ObjectCardCell
 - `components/python/` — PythonPanel, PyBlockCard, CodeEditor(CodeMirror 6), SnippetMenu, InitScriptDialog
 - `components/panels/` — BottomPanel, DiagnosticsTab, OutputPreviewTab, VariablesTab, ConsoleTab
 - `lib/grid/` — 워크북 모델(Zustand+Immer+zundo), a1.ts, clipboard/(parse·infer·serialize), spill.ts

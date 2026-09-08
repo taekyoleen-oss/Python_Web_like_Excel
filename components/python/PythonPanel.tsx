@@ -2,7 +2,7 @@
 
 // Python 패널 — 헤더(블록 추가·전체 실행·중단·계산 모드·목차/AI 토글) + 블록 목록(계산 순서)
 // + 스니펫·초기화 스크립트 + 참조 삽입 바 (§2.3.2).
-// Python 조작은 전부 이 패널 헤더에 있다 — 그리드 툴바는 시트 편집 + 좌우 패널 접기 전용.
+// Python 조작은 전부 이 패널 헤더에 있다 — 시트 편집은 그리드 패널 안 SheetEditToolbar.
 // 목차는 전용 패널(TocPanel)로 분리되었다 (부록 D.2).
 
 import { useMemo } from "react";
@@ -20,7 +20,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { ToolButton } from "@/components/grid/GridToolbar";
+import { ToolButton } from "@/components/shell/ShellBar";
 import { AiGenerateBar } from "@/components/python/AiAssist";
 import InitScriptDialog from "@/components/python/InitScriptDialog";
 import PyBlockCard from "@/components/python/PyBlockCard";

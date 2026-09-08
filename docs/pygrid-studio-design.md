@@ -306,7 +306,8 @@ RunResult {
 | `WorkbookShell` | 전체 레이아웃, 분할 비율·하단 패널 높이 조절, 단축키 라우팅 |
 | `SheetGrid` | Glide Data Grid 래퍼. 셀 렌더(타입별 정렬·서식), spill 테두리, `[PY]` 배지, 객체 카드 셀, 오류 셀, 선택 → 참조 삽입 이벤트 |
 | `SheetTabs` | 시트 추가·이름 변경·순서 변경(계산 순서에 영향) |
-| `GridToolbar` | 붙여넣기 옵션, 행/열 삽입·삭제, 정렬, 열 고정, 블록 추가, 전체 실행/중단, 계산 모드 |
+| `SheetEditToolbar` | (그리드 패널 안) 붙여넣기 옵션, 행/열 삽입·삭제, 정렬, 열 고정, 굵게·글자 크기 — 스프레드시트를 접으면 함께 사라진다 |
+| `ShellBar` | (2행) 스프레드시트 접기, 파일·샘플·최근 워크북 메뉴, ? 단축키, Python 패널 접기(+접힘 시 전체 실행) |
 | `PasteImportDialog` | 붙여넣기 미리보기(상위 20행), 열별 추론 유형 표시·수정, 헤더 행 여부, 대상 위치(현재 셀/새 시트) |
 | `PythonPanel` | 블록 목록(계산 순서), 접기/펼치기, 드래그 없음(순서는 앵커가 결정), 초기화 스크립트 열기 |
 | `PyBlockCard` | 블록 헤더(앵커 주소, 출력 모드, 상태 배지, ▶/■/삭제) + `CodeEditor` + 참조 삽입 바 |
@@ -406,8 +407,8 @@ RunResult {
   │   └── page.tsx                       # WorkbookShell 마운트 (ssr: false)
   ├── components/
   │   ├── ui/                            # TweakCN 커스터마이징 컴포넌트
-  │   ├── shell/                         # WorkbookShell, Header, StatusBar, FileMenu
-  │   ├── grid/                          # SheetGrid, SheetTabs, GridToolbar, PasteImportDialog, ObjectCardCell
+  │   ├── shell/                         # WorkbookShell, Header, ShellBar, StatusBar, FileMenu
+  │   ├── grid/                          # SheetGrid, SheetTabs, SheetEditToolbar, PasteImportDialog, ObjectCardCell
   │   ├── python/                        # PythonPanel, PyBlockCard, CodeEditor, SnippetMenu, InitScriptDialog
   │   └── panels/                        # BottomPanel, DiagnosticsTab, OutputPreviewTab, VariablesTab, ConsoleTab
   ├── lib/

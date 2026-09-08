@@ -10,8 +10,8 @@ import {
   ResizablePanelGroup,
 } from "@/components/ui/resizable";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import GridToolbar, { togglePanelCollapse } from "@/components/grid/GridToolbar";
 import PasteImportDialog, { startPasteFlow } from "@/components/grid/PasteImportDialog";
+import SheetEditToolbar from "@/components/grid/SheetEditToolbar";
 import SheetGrid from "@/components/grid/SheetGrid";
 import SheetTabs from "@/components/grid/SheetTabs";
 import AiChatPanel from "@/components/ai-chat/AiChatPanel";
@@ -26,6 +26,7 @@ import {
 } from "@/components/shell/FileMenu";
 import Header from "@/components/shell/Header";
 import { RuntimeStatus } from "@/components/shell/RuntimeStatus";
+import ShellBar, { togglePanelCollapse } from "@/components/shell/ShellBar";
 import StatusBar from "@/components/shell/StatusBar";
 import dynamic from "next/dynamic";
 
@@ -302,7 +303,7 @@ export default function WorkbookShell() {
         </Header>
         {/* 워크북 뷰 — 참조 뷰 활성 시에도 마운트 유지(hidden): 런타임·그리드 상태 보존 */}
         <div className={view === "workbook" ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
-        <GridToolbar />
+        <ShellBar />
         <main className="flex min-h-0 flex-1 flex-col">
         {tier === "md" || tier === "sm" ? (
           /* §4.7 640–1023(및 <640 열람 우선): 그리드 ↔ Python ↔ 결과 탭 전환 */
@@ -338,6 +339,7 @@ export default function WorkbookShell() {
                   {...dropHandlers}
                   className={`flex h-full min-w-0 flex-col ${dropActive ? "ring-2 ring-inset ring-primary" : ""}`}
                 >
+                  <SheetEditToolbar />
                   <SheetGrid />
                   <SheetTabs />
                 </div>
@@ -375,6 +377,7 @@ export default function WorkbookShell() {
                         {...dropHandlers}
                         className={`flex h-full min-w-0 flex-col ${dropActive ? "ring-2 ring-inset ring-primary" : ""}`}
                       >
+                        <SheetEditToolbar />
                         <SheetGrid />
                         <SheetTabs />
                       </div>

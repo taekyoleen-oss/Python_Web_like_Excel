@@ -1,19 +1,16 @@
 "use client";
 
-// 그리드 툴바 — 시트 편집 전용(붙여넣기·행/열·열 고정·정렬·서식).
-// 양 끝은 좌우 패널 접기: 왼쪽 끝 스프레드시트, 오른쪽 끝 Python 패널.
-// Python 조작(블록 추가·전체 실행·계산 모드·목차/AI)은 PythonPanel 헤더에 있다.
+// 시트 편집 툴바 — 붙여넣기·행/열 삽입 삭제·열 고정·정렬·서식.
+// 그리드 패널 **안**에 산다: 스프레드시트를 접으면 이 툴바도 함께 사라진다.
+// 패널 접기·파일 계열 메뉴는 셸 바(components/shell/ShellBar.tsx)에 있다.
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
   ClipboardText,
-  Code,
-  Play,
   PushPin,
   SortAscending,
   SortDescending,
-  Table,
   TextB,
 } from "@phosphor-icons/react";
 import { startPasteFlow } from "@/components/grid/PasteImportDialog";
@@ -29,21 +26,16 @@ import {
 } from "@/components/ui/dialog";
 import { Separator } from "@/components/ui/separator";
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
-import type { DateOrder } from "@/lib/grid/clipboard/infer";
-import { parseClipboard } from "@/lib/grid/clipboard/parse";
-import { isRangeBold, useWorkbookStore, type CellEdit } from "@/lib/grid/model";
-import { runAllBlocks } from "@/lib/grid/run-block";
-import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { ToolButton } from "@/components/shell/ShellBar";
+import type { DateOrder } from "@/lib/grid/clipboard/infer";
+import { parseClipboard } from "@/lib/grid/clipboard/parse";
+import { isRangeBold, useWorkbookStore, type CellEdit } from "@/lib/grid/model";
 import { loadSettings, saveSettings } from "@/lib/storage/db";
 import { cellKey, parseCellKey, type Cell } from "@/types/workbook";
 
@@ -132,59 +124,6 @@ function PasteOptionsDialog({ open, onClose }: { open: boolean; onClose: () => v
   );
 }
 
-/**
- * 그리드·Python 패널 접기 토글 (툴바·세로 스트립·단축키 공용).
- * next 생략 시 현재 상태를 뒤집는다. 접힘 상태는 앱 설정에 저장 — 새로고침해도 유지.
- */
-export function togglePanelCollapse(panel: "grid" | "python", next?: boolean): void {
-  const st = useWorkbookStore.getState();
-  const current = panel === "grid" ? st.gridCollapsed : st.pyCollapsed;
-  const target = next ?? !current;
-  if (target === current) return; // 이미 그 상태 — 불필요한 설정 쓰기 방지
-  st.setPanelCollapsed(panel, target);
-  const { gridCollapsed, pyCollapsed } = useWorkbookStore.getState();
-  void saveSettings({ gridCollapsed, pyCollapsed });
-}
-
-/** 아이콘 전용 툴 버튼 + 툴팁 — 그리드 툴바와 Python 패널 헤더 공용 */
-export function ToolButton({
-  label,
-  onClick,
-  disabled,
-  soon,
-  active,
-  children,
-}: {
-  label: string;
-  onClick?: () => void;
-  disabled?: boolean;
-  /** 후속 마일스톤 자리표시 */
-  soon?: boolean;
-  active?: boolean;
-  children: ReactNode;
-}) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span tabIndex={disabled ? 0 : undefined}>
-          <Button
-            variant="ghost"
-            size="icon"
-            className={active ? "size-8 text-primary" : "size-8"}
-            onClick={onClick}
-            disabled={disabled}
-            aria-label={label}
-            aria-pressed={active}
-          >
-            {children}
-          </Button>
-        </span>
-      </TooltipTrigger>
-      <TooltipContent>{soon ? `${label} — 곧 제공` : label}</TooltipContent>
-    </Tooltip>
-  );
-}
-
 const isEmpty = (cell?: Cell): boolean =>
   !cell || cell.v === null || cell.v === "";
 
@@ -256,7 +195,7 @@ function sortByColumn(direction: 1 | -1): void {
   setCells(activeSheetId, edits); // 한 트랜잭션 = 한 undo 단계
 }
 
-export default function GridToolbar() {
+export default function SheetEditToolbar() {
   const selection = useWorkbookStore((s) => s.selection);
   const frozenCols = useWorkbookStore(
     (s) => s.workbook.sheets.find((sh) => sh.id === s.activeSheetId)?.frozenCols ?? 0,
@@ -275,8 +214,6 @@ export default function GridToolbar() {
     const fs = sel && sheet ? sheet.cells[cellKey(sel.r0, sel.c0)]?.st?.fs : undefined;
     return fs ? String(fs) : "default";
   });
-  const gridCollapsed = useWorkbookStore((s) => s.gridCollapsed);
-  const pyCollapsed = useWorkbookStore((s) => s.pyCollapsed);
 
   const store = () => useWorkbookStore.getState();
   const rowIndex = selection?.r0 ?? 0;
@@ -292,21 +229,9 @@ export default function GridToolbar() {
 
   return (
     <div
-      data-testid="grid-toolbar"
-      className="flex h-10 shrink-0 items-center gap-1 border-b bg-muted/40 px-2"
+      data-testid="sheet-edit-toolbar"
+      className="flex h-10 shrink-0 flex-wrap items-center gap-1 overflow-hidden border-b bg-muted/40 px-2"
     >
-      {/* 패널 접기 — 1024px 미만은 탭 전환 UI라 접기 개념이 없다 (lg:contents = 레이아웃 무영향) */}
-      <span className="hidden lg:contents">
-        <ToolButton
-          label={gridCollapsed ? "스프레드시트 보이기 (Ctrl+Alt+1)" : "스프레드시트 감추기 (Ctrl+Alt+1)"}
-          active={gridCollapsed}
-          onClick={() => togglePanelCollapse("grid")}
-        >
-          <Table />
-        </ToolButton>
-        <Separator orientation="vertical" className="mx-1 h-5" />
-      </span>
-
       <ToolButton label="붙여넣기 옵션 (텍스트로 붙여넣기)" onClick={() => setPasteDialogOpen(true)}>
         <ClipboardText />
       </ToolButton>
@@ -378,34 +303,6 @@ export default function GridToolbar() {
           ))}
         </SelectContent>
       </Select>
-
-      {/* Python 패널 접기 — 툴바 오른쪽 끝 (스프레드시트 접기와 좌·우로 마주본다) */}
-      <span className="ml-auto hidden items-center gap-1 lg:flex">
-        {/* 패널이 접혀 있으면 ▶ 전체 실행만 여기로 되돌아온다 — 접힌 채로도 재계산 가능 */}
-        {pyCollapsed && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="default"
-                size="icon"
-                className="size-8"
-                onClick={() => void runAllBlocks()}
-                aria-label="전체 실행"
-              >
-                <Play weight="fill" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>전체 실행 — 계산 순서대로 모든 블록</TooltipContent>
-          </Tooltip>
-        )}
-        <ToolButton
-          label={pyCollapsed ? "Python 패널 보이기 (Ctrl+Alt+2)" : "Python 패널 감추기 (Ctrl+Alt+2)"}
-          active={pyCollapsed}
-          onClick={() => togglePanelCollapse("python")}
-        >
-          <Code />
-        </ToolButton>
-      </span>
     </div>
   );
 }
