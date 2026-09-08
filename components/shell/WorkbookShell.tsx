@@ -242,10 +242,6 @@ export default function WorkbookShell() {
         if (settings?.splitRatio) setSplitRatio(settings.splitRatio);
         if (settings?.bottomPanelHeight) setBottomHeight(settings.bottomPanelHeight);
         if (settings?.tocOpen) useWorkbookStore.getState().setTocOpen(true);
-        if (settings?.gridCollapsed)
-          useWorkbookStore.getState().setPanelCollapsed("grid", true);
-        if (settings?.pyCollapsed)
-          useWorkbookStore.getState().setPanelCollapsed("python", true);
         if (settings?.aiChatOpen) useWorkbookStore.getState().setAiChatOpen(true);
         if (settings?.showRefs === false) useWorkbookStore.getState().setShowRefs(false);
         if (settings?.view === "reference") useWorkbookStore.getState().setView("reference");

@@ -17,10 +17,6 @@ export interface AppSettings {
   dateOrder?: "ymd" | "mdy";
   /** 목차 전용 패널 열림 (기본 false) */
   tocOpen?: boolean;
-  /** 스프레드시트 패널 접힘 (기본 false) — 그리드·Python이 동시에 접히지는 않는다 */
-  gridCollapsed?: boolean;
-  /** Python 패널 접힘 (기본 false) */
-  pyCollapsed?: boolean;
   /** 실행 참조 표시 (부록 J.3, 기본 true) */
   showRefs?: boolean;
   /** 상단 뷰 전환 — 워크북 | 데이터 예제/분석 (부록 E, 기본 'workbook') */

@@ -21,7 +21,6 @@ import {
 } from "@/components/ui/tooltip";
 import { useWorkbookStore } from "@/lib/grid/model";
 import { runAllBlocks } from "@/lib/grid/run-block";
-import { saveSettings } from "@/lib/storage/db";
 
 /**
  * 그리드·Python 패널 접기 토글 (툴바·세로 스트립·단축키 공용).
@@ -34,7 +33,7 @@ export function togglePanelCollapse(panel: "grid" | "python", next?: boolean): v
   if (target === current) return; // 이미 그 상태 — 불필요한 설정 쓰기 방지
   st.setPanelCollapsed(panel, target);
   const { gridCollapsed, pyCollapsed } = useWorkbookStore.getState();
-  void saveSettings({ gridCollapsed, pyCollapsed });
+  // 접힘은 세션 한정 — 앱을 새로 열면 항상 시트·Python 패널이 함께 보이는 것이 기본값이다
 }
 
 /** 아이콘 전용 툴 버튼 + 툴팁 — 셸 바·시트 편집 툴바·Python 패널 헤더 공용 */

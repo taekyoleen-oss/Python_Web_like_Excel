@@ -83,33 +83,21 @@ test("둘 다 접기 시도 → 나중에 접은 쪽만 접히고 반대쪽은 �
   expect(await collapseState(page)).toEqual({ grid: false, python: false });
 });
 
-test("접힘 상태는 설정에 저장되어 새로고침 후 복원된다", async ({ page }) => {
+test("접힘은 세션 한정 — 새로고침하면 기본값(시트·Python 함께 표시)으로 돌아온다", async ({ page }) => {
   await page.goto("/");
   await waitForApp(page);
 
   await page.getByRole("button", { name: "Python 패널 감추기 (Ctrl+Alt+2)" }).click();
   await expect(page.getByTestId("strip-python")).toBeVisible();
-  // 설정 쓰기(IndexedDB) 완료 대기
-  await expect
-    .poll(() =>
-      page.evaluate(async () => {
-        const db: any = await new Promise((res) => {
-          const req = indexedDB.open("pygrid");
-          req.onsuccess = () => res(req.result);
-        });
-        return await new Promise((res) => {
-          const r = db.transaction("settings").objectStore("settings").get("app");
-          r.onsuccess = () => res(r.result?.pyCollapsed ?? null);
-        });
-      }),
-    )
-    .toBe(true);
+  await expect(page.locator("#python")).toHaveCount(0);
 
   await page.reload();
   await waitForApp(page);
-  await expect(page.getByTestId("strip-python")).toBeVisible();
-  await expect(page.locator("#python")).toHaveCount(0);
-  expect(await collapseState(page)).toEqual({ grid: false, python: true });
+  // 앱의 기본 상태 = 두 패널이 함께 보인다
+  await expect(page.locator("#grid")).toHaveCount(1);
+  await expect(page.locator("#python")).toHaveCount(1);
+  await expect(page.getByTestId("strip-python")).toHaveCount(0);
+  expect(await collapseState(page)).toEqual({ grid: false, python: false });
 });
 
 test("그리드 최소 폭 15% — 핸들을 끝까지 밀면 40%보다 좁아진다", async ({ page }) => {
