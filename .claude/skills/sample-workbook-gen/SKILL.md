@@ -20,6 +20,15 @@ python .claude/skills/sample-workbook-gen/scripts/build_samples.py
 - `chain-ladder.pygrid.json` — 지급준비금(triangle 8×8): 개발계수·완성 삼각형·IBNR·Mack 표준오차.
 - `premium-term.pygrid.json` — 보험료 산출·정기보험(부록 M): 계산기수 → 보험료(원본 검산) → 준비금·해약환급금 → 표준/적용 비교.
   원본은 `PREMIUM_SRC`(OneDrive 산출과정표 xlsx) — 없으면 생성을 건너뛰고 기존 JSON을 유지한다.
+- `cancer-multi.pygrid.json` — 암보험 다중탈퇴(부록 M.4 #6): 위험률 11종(발생률 vs 비율) → 담보별 다중탈퇴 생존자표
+  → Cx·Mx(90일 면책 3/4) → 급부배율 SUMX → 순·영업공제료 → 원본 `총괄` 대조 검산.
+  원본은 `CANCER_SRC`(OneDrive 더블암진단특약.xlsx) — 없으면 생성을 건너뛰고 기존 JSON을 유지한다.
+- `risk-rate.pygrid.json` — 위험률 산출(부록 M.4 #5): 발생자수÷추계인구 = 조율 → 비만동반 비율·안전할증 0.5
+  → 직선보간 + 그레빌 9항 평활(양끝 4개 외삽) → 원본 `3. 산출결과` 111행 대조 검산 → 연령별 곡선.
+  원본은 `RISK_SRC`(OneDrive 영양조사.xlsx) — 없으면 생성을 건너뛰고 기존 JSON을 유지한다.
+- `nonsurrender.pygrid.json` — 무해지환급형(부록 M.4 #8): 치매 CDR 발생률 → 해지율 4% 이중탈퇴 생존자표
+  → 현금흐름 PV(Dx·Cx·Nx·Mx 대체, 중증치매 연금 10년) → 순·영업보험료(12) → 무해지 vs 표준형 환급률 곡선
+  → 원본 `P테이블` 10개 조합 대조 검산. 원본은 `NS_SRC`(OneDrive 치매보험 PV산출.xlsm — zip 구조라 xlsx와 같은 파서로 읽힌다).
 - `loss-ratio.pygrid.json` · `claim-severity.pygrid.json` — 소형 기본 예제(부록 H.2).
 - `data/snippets.json` — 초보자용 스니펫(기술통계·그룹 집계·피벗·히스토그램·선형회귀·생명표 lx 계산).
 

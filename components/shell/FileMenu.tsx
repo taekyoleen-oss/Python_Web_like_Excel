@@ -85,6 +85,21 @@ const SAMPLE_ACTUARIAL: SampleWorkbook[] = [
     label: "보험료 산출 (정기보험)",
     load: () => dyn(import("@/data/sample-workbooks/premium-term.pygrid.json")),
   },
+  {
+    // 부록 M.4 — 다중탈퇴 생존자표 → Cx·Mx(90일 면책) → 급부배율 → 공제료
+    label: "암보험 (다중탈퇴)",
+    load: () => dyn(import("@/data/sample-workbooks/cancer-multi.pygrid.json")),
+  },
+  {
+    // 부록 M.4 — 발생자수÷추계인구 → 조율 → 비만동반·안전할증 → 보간·평활 → 원본 대조
+    label: "위험률 산출 (원시통계)",
+    load: () => dyn(import("@/data/sample-workbooks/risk-rate.pygrid.json")),
+  },
+  {
+    // 부록 M.4 — CDR 발생률 → 이중탈퇴 생존자 → 현금흐름 PV → 환급률 → P테이블 대조
+    label: "무해지환급형 (해지율 PV)",
+    load: () => dyn(import("@/data/sample-workbooks/nonsurrender.pygrid.json")),
+  },
 ];
 
 /** 기능 소개용 소형 예제 (부록 H.2) */

@@ -90,6 +90,21 @@ const SAMPLES = [
     title: "보험료 산출 — 정기보험(계산기수·준비금)",
     codeBlocks: 6,
   },
+  {
+    label: "암보험 (다중탈퇴)",
+    title: "암보험 — 다중탈퇴 기수·급부배율 보험료",
+    codeBlocks: 7,
+  },
+  {
+    label: "위험률 산출 (원시통계)",
+    title: "위험률 산출 — 원시통계에서 적용률까지",
+    codeBlocks: 6,
+  },
+  {
+    label: "무해지환급형 (해지율 PV)",
+    title: "무해지환급형 — 해지율 반영 PV 산출",
+    codeBlocks: 6,
+  },
 ];
 
 for (const s of SAMPLES) {
@@ -131,6 +146,57 @@ for (const s of SAMPLES) {
       // 부록 M ④ — 표준·적용 비교표 spill (경과년 25행)
       expect(await spillRowsUnder(page, "표준준비금")).toBe(25);
       expect(await spillRowsUnder(page, "해약환급금")).toBe(25);
+    }
+    if (s.label === "암보험 (다중탈퇴)") {
+      // 부록 M.4 ⑥ — 원본 `총괄` 대조 검산표의 "차이" 열이 전부 허용오차(1e-6) 안이어야 한다
+      const diffs = await columnUnder(page, "차이");
+      expect(diffs.length).toBe(12);
+      for (const d of diffs) expect(Math.abs(Number(d))).toBeLessThanOrEqual(1e-6);
+      // ② 다중탈퇴 생존자표 — 가입 40세 ~ 만기 80세 = 41행
+      expect(await spillRowsUnder(page, "lx(2) 일반암")).toBe(41);
+      // ④ 급부배율 표 — 담보 8종
+      expect(await spillRowsUnder(page, "기여도")).toBe(8);
+      // ⑦ 담보별 기여도 그래프는 객체 모드
+      const figures = await page.evaluate(() =>
+        Object.values(
+          (window as any).__pygridStore.getState().workbook.sheets[0].cells,
+        ).filter((c: any) => String(c.v ?? "").startsWith("[Figure")).length,
+      );
+      expect(figures).toBeGreaterThan(0);
+    }
+    if (s.label === "위험률 산출 (원시통계)") {
+      // 부록 M.4 #5 ⑤ — 원본 `3. 산출결과` 대조표의 차이 열 (연령 19개 샘플)
+      for (const col of ["차이_남", "차이_여"]) {
+        const diffs = await columnUnder(page, col);
+        expect(diffs.length, col).toBe(19);
+        for (const d of diffs) expect(Math.abs(Number(d))).toBeLessThanOrEqual(1e-9);
+      }
+      // ④ 연령별 적용률 — 0~110세 111행
+      expect(await spillRowsUnder(page, "최종_남")).toBe(111);
+      // ⑥ 조율·적용률 곡선은 객체 모드
+      const figures = await page.evaluate(() =>
+        Object.values(
+          (window as any).__pygridStore.getState().workbook.sheets[0].cells,
+        ).filter((c: any) => String(c.v ?? "").startsWith("[Figure")).length,
+      );
+      expect(figures).toBeGreaterThan(0);
+    }
+    if (s.label === "무해지환급형 (해지율 PV)") {
+      // 부록 M.4 #8 ⑥ — 원본 `P테이블` 10개 조합 대조. 요율은 원 단위라 차이 0이어야 한다
+      for (const col of ["차이_순p", "차이_영업p", "차이_정기순p", "차이_알파"]) {
+        const diffs = await columnUnder(page, col);
+        expect(diffs.length, col).toBe(10);
+        for (const d of diffs) expect(Math.abs(Number(d))).toBeLessThanOrEqual(1e-6);
+      }
+      // ② 이중탈퇴 생존자표 — 가입 45세 ~ 만기 90세 = 46행
+      expect(await spillRowsUnder(page, "전탈퇴생존자")).toBe(46);
+      // ⑤ 무해지 vs 표준형 환급률 곡선은 객체 모드
+      const figures = await page.evaluate(() =>
+        Object.values(
+          (window as any).__pygridStore.getState().workbook.sheets[0].cells,
+        ).filter((c: any) => String(c.v ?? "").startsWith("[Figure")).length,
+      );
+      expect(figures).toBeGreaterThan(0);
     }
     if (s.label === "지급준비금 (체인래더)") {
       // 준비금 — 첫 사고연도는 완전 진전이라 0
