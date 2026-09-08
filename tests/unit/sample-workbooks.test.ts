@@ -33,8 +33,8 @@ function usedRange(sheet: Sheet): { maxR: number; maxC: number } {
 }
 
 test("샘플 워크북 파일이 존재한다", () => {
-  expect(FILES.length).toBeGreaterThanOrEqual(14);
-  for (const f of ["life-table", "premium-glm", "freq-severity", "survival-retention", "chain-ladder", "premium-term", "cancer-multi", "risk-rate", "nonsurrender", "term-variants", "whole-life-multi", "accident-class"]) {
+  expect(FILES.length).toBeGreaterThanOrEqual(16);
+  for (const f of ["life-table", "premium-glm", "freq-severity", "survival-retention", "chain-ladder", "premium-term", "cancer-multi", "risk-rate", "nonsurrender", "term-variants", "whole-life-multi", "accident-class", "cancer-annuity", "ci-whole-life"]) {
     expect(FILES).toContain(`${f}.pygrid.json`);
   }
 });

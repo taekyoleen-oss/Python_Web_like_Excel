@@ -115,6 +115,16 @@ const SAMPLE_ACTUARIAL: SampleWorkbook[] = [
     label: "상해공제 (직종축)",
     load: () => dyn(import("@/data/sample-workbooks/accident-class.pygrid.json")),
   },
+  {
+    // 부록 M.6 — CI 11종 경합 제거 결합 → 3중탈퇴 생존자표 → CI 선지급 급부 현가 → 보험료
+    label: "CI종신 (3중탈퇴)",
+    load: () => dyn(import("@/data/sample-workbooks/ci-whole-life.pygrid.json")),
+  },
+  {
+    // 부록 M.6 — 주요암 qc → 암발생후사망률 2차원표 → 진단 후 생활비 연금현가 → 급부 A~F
+    label: "암보험 (진단 후 생활비)",
+    load: () => dyn(import("@/data/sample-workbooks/cancer-annuity.pygrid.json")),
+  },
 ];
 
 /** 기능 소개용 소형 예제 (부록 H.2) */

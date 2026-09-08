@@ -120,6 +120,16 @@ const SAMPLES = [
     title: "상해공제 — 직종별 위험률·만기환급형",
     codeBlocks: 7,
   },
+  {
+    label: "암보험 (진단 후 생활비)",
+    title: "암보험 — 진단 후 생활비(연금) 현가",
+    codeBlocks: 7,
+  },
+  {
+    label: "CI종신 (3중탈퇴)",
+    title: "CI종신 — 3중탈퇴 생존자표",
+    codeBlocks: 7,
+  },
 ];
 
 for (const s of SAMPLES) {
@@ -265,6 +275,60 @@ for (const s of SAMPLES) {
         ).filter((c: any) => String(c.v ?? "").startsWith("[Figure")).length,
       );
       expect(figures).toBeGreaterThan(0);
+    }
+    if (s.label === "암보험 (진단 후 생활비)") {
+      // 부록 M.6 #11 ⑥ — 원본 `기수표(생활비암)` 공제료 블록·`급부기준` 45항목 대조
+      const diffs = await columnUnder(page, "차이");
+      expect(diffs.length).toBe(45);
+      for (const d of diffs) expect(Math.abs(Number(d))).toBeLessThanOrEqual(1e-6);
+      // ① 주요암 qc 도출 — 가입 40세 ~ 만기 15년 = 16행
+      expect(await spillRowsUnder(page, "qc 주요암발생률")).toBe(16);
+      // ② 암발생후사망률 2차원표 — 진단연령 16행 × 경과 0~10 (데이터 시트 헤더와 겹치지 않는 열로 센다)
+      expect(await spillRowsUnder(page, "10년생존율")).toBe(16);
+      // ④ 급부 6종 현가
+      expect(await spillRowsUnder(page, "비중(%)")).toBe(6);
+      // ⑦ 연령별 공제료·급부 구성비 그래프는 객체 모드
+      const figs = await page.evaluate(() =>
+        Object.values(
+          (window as any).__pygridStore.getState().workbook.sheets[0].cells,
+        ).filter((c: any) => String(c.v ?? "").startsWith("[Figure")).length,
+      );
+      expect(figs).toBeGreaterThan(0);
+    }
+    if (s.label === "CI종신 (3중탈퇴)") {
+      // 부록 M.6 #12 ⑥ — 원본이 산출방법서 PDF(산식만·발생률 수치 없음)라 원본 산출값 대조가
+      // 불가능하다. 검산 대신 **자체 정합성 검증** 29행 — `판정`에 '실패'가 하나도 없어야 한다.
+      const verdicts = await columnUnder(page, "판정");
+      expect(verdicts.length).toBe(29);
+      expect(verdicts.filter((v) => v === "실패")).toEqual([]);
+      expect(verdicts.filter((v) => v === "OK").length).toBeGreaterThanOrEqual(16);
+      // ② 경합 제거 결합은 언제나 단순 합산보다 작다 (제1보험기간 40~80세 = 41행)
+      const comb = await columnUnder(page, "q^CI(결합)");
+      const naive = await columnUnder(page, "단순합 Σwʲ+b");
+      expect(comb.length).toBe(41);
+      expect(naive.length).toBe(41);
+      comb.forEach((c, i) => expect(Number(c)).toBeLessThanOrEqual(Number(naive[i]) + 1e-12));
+      // ③ 3중탈퇴 생존자표 — L¹은 단조감소하고 Lx를 넘지 않는다
+      const L = (await columnUnder(page, "Lx")).map(Number);
+      const L1 = (await columnUnder(page, "L1x")).map(Number);
+      const L2 = (await columnUnder(page, "L2x")).map(Number);
+      expect(L1.length).toBe(41);
+      L1.forEach((v, i) => {
+        expect(v).toBeLessThanOrEqual(L[i] + 1e-6);
+        expect(L2[i]).toBeLessThanOrEqual(v + 1e-6);
+        if (i > 0) expect(v).toBeLessThanOrEqual(L1[i - 1] + 1e-6);
+      });
+      // ④ 급부 기수 — 가입 40세 ~ 110세 = 71행
+      expect(await spillRowsUnder(page, "C2x")).toBe(71);
+      // ⑤ 보험료 산출 단계 18행
+      expect(await spillRowsUnder(page, "산출항목")).toBe(18);
+      // ⑦ 생존자 곡선·탈퇴 원인별 기여도는 객체 모드
+      const figs = await page.evaluate(() =>
+        Object.values(
+          (window as any).__pygridStore.getState().workbook.sheets[0].cells,
+        ).filter((c: any) => String(c.v ?? "").startsWith("[Figure")).length,
+      );
+      expect(figs).toBeGreaterThan(0);
     }
     if (s.label === "지급준비금 (체인래더)") {
       // 준비금 — 첫 사고연도는 완전 진전이라 0

@@ -31,12 +31,9 @@
   "include": [
     "**/*.ts",
     "**/*.tsx",
-    ".next-build/types/**/*.ts",
-    ".next-tv/types/**/*.ts",
-    ".next-wl/types/**/*.ts",
     ".next/types/**/*.ts",
-    "next-env.d.ts",
-    ".next-ac/types/**/*.ts"
+    ".next-*/types/**/*.ts",
+    "next-env.d.ts"
   ],
   "exclude": [
     "node_modules"
